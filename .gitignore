@@ -1,0 +1,10 @@
+__pycache__
+.mypy_cache
+
+logs
+data_numpy_dir
+omniglot
+mini_imagenet
+tiered_imagenet
+miniimagenet
+tieredimagenet

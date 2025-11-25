@@ -1,2 +1,3 @@
-# hypertransformer-pytorch
-Pytorch implementation of (Continual) Hyper Tranformer.
+# HyperTransformer PyTorch
+
+Pytorch implementation of (Continual) HyperTransformer.
