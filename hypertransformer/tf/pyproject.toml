@@ -29,7 +29,9 @@ tensorflow = {extras = ["and-cuda"], version = "2.15.1"} # Tensorflow Addons sup
 tensorflow-datasets = "^4.9.9"
 tf-slim = "^1.1.0"
 tensorflow-addons = "^0.23.0"
-tensorrt = "^10.14.1.48.post1"
+tensorrt = { version = "^10.14.1.48.post1", optional = true }
+# `pip install --extra-index-url https://pypi.nvidia.com/ tensorrt-cu13-libs`
+tensorrt-cu13-libs = { version = "^10.14.1", source = "nvidia", optional = true }
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

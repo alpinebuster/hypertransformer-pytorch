@@ -6,8 +6,8 @@ import os
 
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
-import tensorflow as tf2
-import tensorflow.compat.v1 as tf
+import tensorflow as tf2 # type: ignore
+import tensorflow.compat.v1 as tf # type: ignore
 
 from hypertransformer.tf.core import transformer
 

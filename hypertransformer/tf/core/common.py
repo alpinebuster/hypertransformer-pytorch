@@ -9,7 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Text, Union
 from absl import flags
 from absl import logging
 
-import tensorflow.compat.v1 as tf
+import tensorflow.compat.v1 as tf # type: ignore
 
 from hypertransformer.tf.core import util
 

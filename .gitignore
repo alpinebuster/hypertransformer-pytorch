@@ -8,3 +8,6 @@ mini_imagenet
 tiered_imagenet
 miniimagenet
 tieredimagenet
+
+*.log
+*.pkl
