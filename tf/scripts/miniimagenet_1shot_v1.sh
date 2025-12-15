@@ -1,7 +1,7 @@
 # Call from the tf root as
 # `./scripts/miniimagenet_1shot_v1.sh` with flags
 # "--data_dir=<miniimagenet> --data_numpy_dir=<miniimagenet_cache> --train_log_dir=<output_path>"
-# e.g. `nohup ./hypertransformer/tf/scripts/miniimagenet_1shot_v1.sh --data_dir=../miniimagenet --data_numpy_dir=../miniimagenet/cache --train_log_dir=../miniimagenet/logs > miniimagenet.log 2>&1 &`
+# e.g. `nohup ./scripts/miniimagenet_1shot_v1.sh --data_dir=../miniimagenet --data_numpy_dir=../miniimagenet/cache --train_log_dir=../miniimagenet/logs > miniimagenet.log 2>&1 &`
 # DS: `--train_dataset=miniimagenet` # or imagenette, emnist
 
 python -m hypertransformer.train --num_layerwise_features=16 --default_num_channels=16 \
