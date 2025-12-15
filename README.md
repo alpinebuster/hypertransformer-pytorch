@@ -1,9 +1,10 @@
-# HyperTransformer PyTorch
+# HyperTransformers
 
-Pytorch implementation of (Continual) HyperTransformer.
+Pytorch/Tensorflow implementation of (Continual) HyperTransformer.
 
 ```sh
-cd hypertransformer/tf/
+# cd ./tf/
+cd ./torch/
 poetry install --no-root
 
 poetry env activate
