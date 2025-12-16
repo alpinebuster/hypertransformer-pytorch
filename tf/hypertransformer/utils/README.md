@@ -1,4 +1,4 @@
-# Obtain `miniImageNet` and `tieredImageNet` cache files
+# Obtain `miniimagenet` and `tieredimagenet` cache files
 
 ```sh
 python ./hypertransformer/tf/utils/cache_miniimagenet.py --input_path=./miniimagenet/cache --output_path=./miniimagenet/cache

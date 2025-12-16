@@ -7,7 +7,6 @@ from hypertransformer.core import datasets
 
 
 class DatasetsTest(tf.test.TestCase):
-
     def test_augmentation_config_randomization(self):
         """Testing randomization in AugmentationConfig."""
         aug_config = datasets.AugmentationConfig(

@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "hypertransformer"
-version = "1.1.0"
+version = "1.1.1"
 description = "Tensorflow implementation of (Continual) HyperTransformer."
 authors = ["zzz <imzqqq@hotmail.com>"]
 license = "AGPL-3.0-or-later"
@@ -37,6 +37,8 @@ tensorflow-addons = "^0.23.0"
 tensorrt = { version = "^10.14.1.48.post1", optional = true }
 # `pip install --extra-index-url https://pypi.nvidia.com/ tensorrt-cu13-libs`
 tensorrt-cu13-libs = { version = "^10.14.1", source = "nvidia", optional = true }
+# opencv-python (>=4.12.0.88,<5.0.0.0) requires numpy (>=2,<2.3.0).
+opencv-python = "<4.12"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
