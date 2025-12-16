@@ -1,6 +1,6 @@
 # Tensorflow implementation of (Continual) HyperTransformer
 
-This code implements the HyperTransformer model as described in the
+Tensorflow implementation of (Continual) HyperTransformer model as described in the
 [HyperTransformer](https://arxiv.org/abs/2201.04182) paper (_HyperTransformer:
 Model Generation for Supervised and Semi-Supervised Few-Shot Learning_) and [Continual HyperTransformer](https://arxiv.org/abs/2301.04584) paper (_Continual HyperTransformer: A Meta-Learner for Continual Few-Shot Learning_).
 
@@ -19,24 +19,24 @@ performance.
 ## Dataset NumPy Files
 
 Datasets that are most widely used for model training (`omniglot`,
-`miniImageNet` and `tieredImageNet`) are provided to the trainer as saved NumPy
+`miniimagenet` and `tieredimagenet`) are provided to the trainer as saved NumPy
 arrays.
 
-`Omniglot` data can be downloaded
+`omniglot` data can be downloaded
 [from here](https://drive.google.com/file/d/1rmxwmCZwEJxuYGajYqFOaVUB7flmM4zI/view?usp=sharing).
-Raw pickle files for `miniImageNet` can be downloaded
+Raw pickle files for `miniimagenet` can be downloaded
 [here](https://www.kaggle.com/datasets/whitemoon/miniimagenet),
-and `tieredImageNet` pickle files can be found in
+and `tieredimagenet` pickle files can be found in
 [this repository](https://github.com/yinboc/few-shot-meta-baseline)
 (courtesy of Kwonjoon Lee).
 
-> `miniImageNet` and `tieredImageNet` cache files can be obtained using utilities
+> `miniimagenet` and `tieredimagenet` cache files can be obtained using utilities
 found in `utils`. 
 
 ## Examples
 
-Folder `scripts` contains several training scripts for `Omniglot`,
-`miniImageNet` and `tieredImageNet` datasets.
+Folder `scripts` contains several training scripts for `omniglot`,
+`miniimagenet` and `tieredimagenet` datasets.
 
 They can be executed as follows:
 

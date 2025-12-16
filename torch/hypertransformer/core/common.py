@@ -26,7 +26,7 @@ field = dataclasses.field
 
 
 @dataclasses.dataclass
-class TrainConfig(object):
+class TrainConfig:
     """Training configuration."""
 
     train_steps: int = 10000
@@ -118,7 +118,7 @@ def _is_not_empty(tensor):
         return True
     return (
         tensor is not None and len(tensor) > 0
-    )  # pylint: disable=g-explicit-length-test
+    ) # pylint: disable=g-explicit-length-test
 
 
 def train(train_config, state, run_options=None):

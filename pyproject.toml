@@ -1,0 +1,110 @@
+[tool.poetry]
+name = "hypertransformer"
+version = "1.0.1"
+description = ""
+authors = ["__z__ <imzqqq@hotmail.com>"]
+license = "AGPL-3.0-or-later"
+readme = "README.md"
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Topic :: Communications :: Tor",
+]
+# packages = [
+#     { include = "tf" },
+#     { include = "torch" },
+# ]
+package-mode = false
+
+[[tool.poetry.source]]
+name = "tsinghua"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple/"
+# priority = "primary"
+priority = "supplemental"
+[[tool.poetry.source]]
+name = "aliyun"
+url = "https://mirrors.aliyun.com/pypi/simple/"
+priority = "supplemental"
+[[tool.poetry.source]]
+name = "nvidia"
+url = "https://pypi.nvidia.com"
+priority = "explicit"
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.12" # tensorflow_addons requires <=3.11
+setuptools_rust = ">=1.11.1"
+attrs = "^24.3.0"
+absl-py = "^2.1.0"
+dm-tree = "^0.1.9"
+numpy = "1.26.4" # Because tensorflow[and-cuda] (2.15.1) depends on numpy (>=1.23.5,<2.0.0)
+fastai = "^2.8.2"
+scikit-learn = "^1.7.2"
+scipy = "^1.16.3"
+pandas = "^2.3.3"
+ipywidgets = "^8.1.7"
+seaborn = "^0.13.2"
+requests = "^2.32.4"
+matplotlib = "^3.10.3"
+tqdm = "^4.67.1"
+opencv-python = "^4.10.0.84"
+pyyaml = "^6.0.2"
+tensorboard = "^2.15.0" # Because tensorflow[and-cuda] (2.15.1) depends on tensorboard (>=2.15,<2.16)
+tensorflow = {extras = ["and-cuda"], version = "2.15.1", optional = true } # Tensorflow Addons supports using Python ops for all Tensorflow versions above or equal to 2.13.0 and strictly below 2.16.0 (nightly versions are not supported)
+tensorflow-datasets = { version = "^4.9.9", optional = true }
+tf-slim = "^1.1.0"
+tensorflow-addons = { version = "^0.23.0", optional = true }
+tensorrt = { version = "^10.14.1.48.post1", optional = true }
+# `pip install --extra-index-url https://pypi.nvidia.com/ tensorrt-cu13-libs`
+tensorrt-cu13-libs = { version = "^10.14.1", source = "nvidia", optional = true }
+torch-tb-profiler = "^0.4.3"
+pydantic = "^2.7.4"
+pillow = "^11.3.0"
+scapy = "^2.6.1"
+netron = "^8.4.6"
+
+torch = { version = "^2.0.1", optional = true }
+torcheval = { version = "^0.0.7", optional = true }
+# View model summaries in PyTorch!
+torchinfo = { version = "^1.8.0", optional = true }
+
+onnx = { version = "^1.18.0", optional = true }
+onnx-graphsurgeon = { version = "^0.5.8", optional = true }
+onnxruntime-tools = { version = "^1.7.0", optional = true }
+onnxruntime = { version = "^1.18.0", optional = true }
+
+# `poetry install --extras gpu`
+[tool.poetry.extras]
+gpu = [
+    "tensorflow",
+    "tensorflow-addons",
+    "tensorflow-datasets",
+
+    "torch",
+    "torcheval",
+    "torchinfo",
+    "tensorrt",
+    "onnx",
+    "onnx-graphsurgeon",
+    "onnxconverter-common",
+    "onnxruntime-tools",
+    "onnxruntime",
+
+    "tensorrt",
+    "tensorrt-cu13-libs",
+]
+
+# `poetry install --with tensorflow`
+[tool.poetry.group.tensorflow.dependencies]
+tensorflow = "^2.15.1"
+tensorflow-addons = "^0.23.0"
+tensorflow-datasets = "^4.9.9"
+tf-slim = "^1.1.0"
+
+# `poetry install --with llm`
+[tool.poetry.group.llm.dependencies]
+safetensors = "^0.5.0"
+transformers = "^4.57.1"
+triton = "^3.3.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
