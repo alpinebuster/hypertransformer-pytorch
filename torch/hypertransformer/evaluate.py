@@ -9,19 +9,17 @@ from absl import app
 from absl import flags
 
 import numpy as np
-import tensorflow.compat.v1 as tf # type: ignore
+import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 
-import tf_slim # type: ignore
+import tf_slim
 
-from hypertransformer import common_flags  # pylint:disable=unused-import
-from hypertransformer import eval_model_flags  # pylint:disable=unused-import
+from hypertransformer import common_flags # pylint:disable=unused-import
+from hypertransformer import eval_model_flags # pylint:disable=unused-import
 from hypertransformer import train
 
-from hypertransformer.core import common
-from hypertransformer.core import common_ht
 from hypertransformer.core import evaluation_lib as eval_lib
 from hypertransformer.core import layerwise
-from hypertransformer.core import layerwise_defs  # pylint:disable=unused-import
+from hypertransformer.core import layerwise_defs # pylint:disable=unused-import
 from hypertransformer.core import util
 
 FLAGS = flags.FLAGS

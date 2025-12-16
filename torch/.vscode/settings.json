@@ -1,10 +1,13 @@
 {
     "cSpell.words": [
         "absl",
+        "avgpool",
         "hypertransformer",
         "layerwise",
+        "lrelu",
+        "MAML",
+        "maxpool",
         "miniimagenet",
-        "omniglot",
-        "tieredimagenet"
+        "onnx"
     ]
 }

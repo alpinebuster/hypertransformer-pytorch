@@ -8,8 +8,8 @@ import random
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
-import tensorflow.compat.v1 as tf # type: ignore
-import tensorflow_datasets as tfds # type: ignore
+import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
+import tensorflow_datasets as tfds
 
 from hypertransformer.core import common_ht
 from hypertransformer.core import datasets

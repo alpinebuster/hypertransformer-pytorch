@@ -4,10 +4,8 @@ import functools
 
 from typing import Any, Optional
 
-import tensorflow.compat.v1 as tf
+import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 import typing_extensions
-
-from hypertransformer.core import common_ht
 
 Protocol = typing_extensions.Protocol
 
@@ -26,10 +24,10 @@ class SimpleConvFeatureExtractor(FeatureExtractor):
         name,
         nonlinear_feature=False,
         kernel_size=3,
-        input_size=None,
+        input_size=0,
         padding="valid",
     ):
-        super(SimpleConvFeatureExtractor, self).__init__(name=name)
+        super().__init__(name=name)
         self.nonlinear_feature = nonlinear_feature
         self.convs = []
         def_stride = 2
@@ -68,7 +66,7 @@ class SimpleConvFeatureExtractor(FeatureExtractor):
                 tensor = tf.nn.relu(tensor)
                 if self.nonlinear_feature:
                     feature = tensor
-                outputs.append(feature)
+                outputs.append(feature) # pyright: ignore[reportPossiblyUnboundVariable]
             outputs = [tf.reduce_mean(tensor, axis=(1, 2)) for tensor in outputs]
             return tf.concat(outputs, axis=-1)
 
@@ -85,7 +83,7 @@ class SharedMultilayerFeatureExtractor(FeatureExtractor):
         padding="valid",
         use_bn=False,
     ):
-        super(SharedMultilayerFeatureExtractor, self).__init__(name=name)
+        super().__init__(name=name)
         self.feature_dim = feature_dim
         self.convs = []
         self.bns = []
@@ -134,7 +132,7 @@ class PassthroughFeatureExtractor(FeatureExtractor):
     """Passthrough feature extractor."""
 
     def __init__(self, name, input_size=None, wrap_class=None):
-        super(PassthroughFeatureExtractor, self).__init__(name=name)
+        super().__init__(name=name)
         self.name = name
         if wrap_class is not None:
             self.wrap_feature_extractor = wrap_class(name=name)

@@ -6,7 +6,7 @@ import functools
 
 from typing import List, Optional
 
-import tensorflow.compat.v1 as tf
+import tensorflow.compat.v1 as tf  # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 
 
 @dataclasses.dataclass

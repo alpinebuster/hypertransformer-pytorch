@@ -1,6 +1,6 @@
 """Tests for `util.py`."""
 
-import tensorflow.compat.v1 as tf
+import tensorflow.compat.v1 as tf  # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 
 from hypertransformer.core import util
 

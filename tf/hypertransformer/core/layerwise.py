@@ -6,7 +6,7 @@ import math
 
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-import tensorflow.compat.v1 as tf
+import tensorflow.compat.v1 as tf  # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 
 from hypertransformer.core import common_ht
 from hypertransformer.core import feature_extractors

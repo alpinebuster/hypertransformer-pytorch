@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "hypertransformer"
-version = "0.3.1"
-description = "Pytorch implementation of (Continual) Hyper Tranformer."
+version = "0.3.2"
+description = "Pytorch implementation of (Continual) HyperTransformer."
 authors = ["__z__ <imzqqq@hotmail.com>"]
 license = "AGPL-3.0-or-later"
 readme = "README.md"

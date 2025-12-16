@@ -4,10 +4,10 @@ import functools
 
 from typing import Any, Optional
 
-import tensorflow.compat.v1 as tf
+import tensorflow.compat.v1 as tf  # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 import typing_extensions
 
-from hypertransformer.core import common_ht
+from hypertransformer.core import common_ht  # pylint:disable=unused-import
 
 Protocol = typing_extensions.Protocol
 

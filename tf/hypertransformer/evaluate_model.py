@@ -9,9 +9,9 @@ from absl import app
 from absl import flags
 
 import numpy as np
-import tensorflow.compat.v1 as tf # type: ignore
+import tensorflow.compat.v1 as tf  # type: ignore
 
-import tf_slim # type: ignore
+import tf_slim
 
 from hypertransformer import common_flags  # pylint:disable=unused-import
 from hypertransformer import eval_model_flags  # pylint:disable=unused-import

@@ -6,7 +6,7 @@ import functools
 from typing import Callable, Dict, Generator, List, Optional, Tuple, Union
 
 import numpy as np
-import tensorflow.compat.v1 as tf
+import tensorflow.compat.v1 as tf  # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 from tensorflow_addons import image as tfi
 import tree
 

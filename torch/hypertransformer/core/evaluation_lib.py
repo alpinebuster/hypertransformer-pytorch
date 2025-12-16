@@ -6,10 +6,9 @@ import dataclasses
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
-import tensorflow.compat.v1 as tf
+import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 
 from hypertransformer.core import common
-from hypertransformer.core import common_ht
 from hypertransformer.core import layerwise
 from hypertransformer.core import train_lib
 

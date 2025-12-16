@@ -6,8 +6,8 @@ import functools
 from typing import Callable, Dict, Generator, List, Optional, Tuple, Union
 
 import numpy as np
-import tensorflow.compat.v1 as tf
-from tensorflow_addons import image as tfi
+import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
+from tensorflow_addons import image as tfi # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 import tree
 
 from hypertransformer.core import common_ht

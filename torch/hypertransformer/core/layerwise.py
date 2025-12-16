@@ -6,7 +6,7 @@ import math
 
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-import tensorflow.compat.v1 as tf
+import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 
 from hypertransformer.core import common_ht
 from hypertransformer.core import feature_extractors
@@ -328,7 +328,7 @@ class BaseCNNLayer(tf.Module):
     """Base CNN layer used in our models."""
 
     def __init__(self, name, model_config, head_builder=None, var_reg_weight=None):
-        super(BaseCNNLayer, self).__init__(name=name)
+        super().__init__(name=name)
         self.model_config = model_config
         self.num_labels = model_config.num_labels
         if var_reg_weight is None:
@@ -422,7 +422,7 @@ class LayerwiseModel(common_ht.Model):
     """Model specification including layer builders."""
 
     def __init__(self, layers, model_config):
-        super(LayerwiseModel, self).__init__()
+        super().__init__()
         self.layers = layers
         self.shared_feature_extractor = feature_extractors.get_shared_feature_extractor(
             model_config
@@ -595,7 +595,7 @@ class ConvLayer(BaseCNNLayer):
         maxpool_size=None,
         head_builder=None,
     ):
-        super(ConvLayer, self).__init__(
+        super().__init__(
             name=name, model_config=model_config, head_builder=head_builder
         )
         if generate_bn is None:
@@ -715,7 +715,7 @@ class LogitsLayer(BaseCNNLayer):
     def __init__(
         self, name, model_config, num_features=None, fe_kernel_size=3, head_builder=None
     ):
-        super(LogitsLayer, self).__init__(
+        super().__init__(
             name=name,
             model_config=model_config,
             head_builder=head_builder,

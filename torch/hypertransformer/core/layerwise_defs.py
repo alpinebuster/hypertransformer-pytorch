@@ -2,7 +2,6 @@
 
 import functools
 
-from hypertransformer.core import common_ht
 from hypertransformer.core import layerwise
 
 ConvLayer = layerwise.ConvLayer
