@@ -3,7 +3,7 @@
 import dataclasses
 import functools
 
-from typing import Callable, Dict, Generator, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
 
 import numpy as np
 import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
@@ -438,7 +438,7 @@ class TaskGenerator:
 
     def __init__(
         self,
-        data: Dict[str, np.ndarray],
+        data: Dict[Any, np.ndarray],
         num_labels,
         image_size,
         always_same_labels=False,

@@ -81,4 +81,5 @@ class TransformerTest(tf.test.TestCase):
 
 
 if __name__ == "__main__":
+    tf.disable_eager_execution()
     tf.test.main()

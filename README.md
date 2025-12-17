@@ -36,3 +36,10 @@ The source code consists of two main parts:
 
 1. _tf_ — Tensorflow implementation.
 2. _torch_ — Pytorch implementation.
+
+The model is trained end-to-end: 
+- (a) A batch of samples for a new episode is
+generated; 
+- (b) Support samples are passed to the Transformer, which generates a
+CNN; 
+- (c) Query samples are then passed through the generated CNN and the final CNN classification loss is used to train the Transformer.

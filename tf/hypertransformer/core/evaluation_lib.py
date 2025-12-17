@@ -9,7 +9,7 @@ import numpy as np
 import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 
 from hypertransformer.core import common
-from hypertransformer.core import common_ht  # pylint:disable=unused-import
+from hypertransformer.core import common_ht
 from hypertransformer.core import layerwise
 from hypertransformer.core import train_lib
 
@@ -41,14 +41,19 @@ class EvaluationConfig:
     load_vars: Optional[VarList] = None
 
 
-def dataset_with_custom_labels(model_config, dataset_config):
+def dataset_with_custom_labels(
+    model_config: common_ht.LayerwiseModelConfig,
+    dataset_config: common_ht.DatasetConfig,
+):
     """Returns a dataset with a controlled label set (should be reshuffled)."""
     custom_labels = copy.copy(dataset_config.use_label_subset)
-    dataset_config = dataclasses.replace(  # pytype: disable=wrong-arg-types  # dataclasses-replace-types
+    dataset_config = dataclasses.replace( # pytype: disable=wrong-arg-types  # dataclasses-replace-types
         dataset_config, use_label_subset=lambda: custom_labels
     )
     dataset, _ = train_lib.make_dataset(
-        model_config=model_config, data_config=dataset_config, shuffle_labels=False
+        model_config=model_config,
+        data_config=dataset_config,
+        shuffle_labels=False,
     )
     return dataset, custom_labels
 

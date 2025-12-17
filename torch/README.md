@@ -45,7 +45,9 @@ The code consists of several parts:
 5. _CNN Model Builder_ — uses generated weight tensors to create a CNN
    (uses TFv1 variable getter mechanism for final weight generation).
 
-The model is trained end-to-end: (a) a batch of samples for a new episode is
-generated; (b) support samples are passed to the Transformer, which generates a
-CNN; (c) query samples are then passed through the generated CNN and the final
-CNN classification loss is used to train the Transformer.
+The model is trained end-to-end: 
+- (a) A batch of samples for a new episode is
+generated; 
+- (b) Support samples are passed to the Transformer, which generates a
+CNN; 
+- (c) Query samples are then passed through the generated CNN and the final CNN classification loss is used to train the Transformer.

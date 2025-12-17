@@ -8,6 +8,7 @@ import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pyli
 import typing_extensions
 
 from hypertransformer.core import common_ht  # pylint:disable=unused-import
+from hypertransformer.core.common_ht import LayerwiseModelConfig
 
 Protocol = typing_extensions.Protocol
 
@@ -26,7 +27,7 @@ class SimpleConvFeatureExtractor(FeatureExtractor):
         name,
         nonlinear_feature=False,
         kernel_size=3,
-        input_size=None,
+        input_size=0,
         padding="valid",
     ):
         super(SimpleConvFeatureExtractor, self).__init__(name=name)
@@ -158,7 +159,7 @@ feature_extractors = {
 }
 
 
-def get_shared_feature_extractor(config):
+def get_shared_feature_extractor(config: LayerwiseModelConfig):
     feature_extractor = config.shared_feature_extractor
     if feature_extractor in ["none", ""]:
         return None

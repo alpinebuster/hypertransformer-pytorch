@@ -4,6 +4,7 @@
         "hypertransformer",
         "layerwise",
         "miniimagenet",
+        "semisupervised",
         "tieredimagenet"
     ]
 }

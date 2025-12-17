@@ -133,7 +133,7 @@ def make_dataset_config(dataset_spec=""):
     return common_ht.DatasetConfig(
         dataset_name=dataset,
         use_label_subset=label_set,
-        tfds_split="train",
+        ds_split="train",
         data_dir=FLAGS.data_dir,
         rotation_probability=FLAGS.rotation_probability,
         smooth_probability=FLAGS.smooth_probability,
@@ -166,7 +166,7 @@ def make_test_dataset_config(dataset_spec=""):
     return common_ht.DatasetConfig(
         dataset_name=dataset,
         use_label_subset=label_set,
-        tfds_split=FLAGS.test_split,
+        ds_split=FLAGS.test_split,
         data_dir=FLAGS.data_dir,
         rotation_probability=_default(
             FLAGS.test_rotation_probability, FLAGS.rotation_probability
@@ -454,17 +454,18 @@ def restore_shared_features():
 
 
 def train(
-    train_config,
-    optimizer_config,
-    dataset_config,
-    test_dataset_config,
-    layerwise_model_config,
+    train_config: common.TrainConfig,
+    optimizer_config: common.OptimizerConfig,
+    dataset_config: common_ht.DatasetConfig,
+    test_dataset_config: common_ht.DatasetConfig,
+    layerwise_model_config: common_ht.LayerwiseModelConfig,
 ):
     """Main function training the model."""
     state = train_lib.ModelState()
     tf.logging.info("Creating the dataset")
     dataset, dataset_state = train_lib.make_dataset(
-        model_config=layerwise_model_config, data_config=dataset_config
+        model_config=layerwise_model_config,
+        data_config=dataset_config,
     )
     test_dataset, _ = train_lib.make_dataset(
         model_config=layerwise_model_config,

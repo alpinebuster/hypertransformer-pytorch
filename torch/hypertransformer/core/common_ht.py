@@ -158,7 +158,7 @@ class DatasetSamples:
     real_class_max: Optional[int] = None
 
 
-def get_cnn_activation(config: ModelConfig | LayerwiseModelConfig):
+def get_cnn_activation(config: LayerwiseModelConfig):
     if config.cnn_activation == "relu":
         return tf.nn.relu
     elif config.cnn_activation == "lrelu":
@@ -168,7 +168,7 @@ def get_cnn_activation(config: ModelConfig | LayerwiseModelConfig):
         raise ValueError(f"Unknown CNN nonlinearity {config.cnn_activation}.")
 
 
-def get_transformer_activation(config: ModelConfig | LayerwiseModelConfig):
+def get_transformer_activation(config: LayerwiseModelConfig):
     if config.transformer_activation == "softmax":
         return tf.nn.softmax
     elif config.transformer_activation == "sigmoid":

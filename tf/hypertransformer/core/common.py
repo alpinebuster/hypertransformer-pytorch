@@ -121,7 +121,7 @@ def _is_not_empty(tensor):
     )  # pylint: disable=g-explicit-length-test
 
 
-def train(train_config, state, run_options=None):
+def train(train_config: TrainConfig, state: TrainState, run_options=None):
     """Train loop."""
     sess = tf.get_default_session()
 
@@ -189,7 +189,7 @@ def train(train_config, state, run_options=None):
     save()
 
 
-def init_training(state):
+def init_training(state: TrainState):
     """Initializes the training loop.
 
     Args:

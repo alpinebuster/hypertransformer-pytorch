@@ -7,6 +7,8 @@ from typing import Any, Optional
 import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 import typing_extensions
 
+from hypertransformer.core.common_ht import LayerwiseModelConfig
+
 Protocol = typing_extensions.Protocol
 
 
@@ -156,7 +158,7 @@ feature_extractors = {
 }
 
 
-def get_shared_feature_extractor(config):
+def get_shared_feature_extractor(config: LayerwiseModelConfig):
     feature_extractor = config.shared_feature_extractor
     if feature_extractor in ["none", ""]:
         return None

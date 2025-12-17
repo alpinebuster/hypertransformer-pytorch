@@ -30,7 +30,7 @@ class DatasetState:
     meta_ds: Optional[Any] = None
 
 
-def make_augmentation_config(data_config: DatasetConfig, num_labels):
+def make_augmentation_config(data_config: DatasetConfig, num_labels: int):
     """Returns dataset augmentation configuration."""
     random_config = datasets.RandomizedAugmentationConfig(
         rotation_probability=data_config.rotation_probability,
@@ -95,7 +95,7 @@ def _load_cache(data_config: DatasetConfig):
     return None
 
 
-def _make_numpy_array(data_config: DatasetConfig, batch_size, sess=None):
+def _make_numpy_array(data_config: DatasetConfig, batch_size: int, sess=None):
     """Makes a NumPy array for given dataset configuration."""
     output = None
     if sess is None:
@@ -105,7 +105,7 @@ def _make_numpy_array(data_config: DatasetConfig, batch_size, sess=None):
         output = _load_cache(data_config)
         if output is None:
             ds = tfds.load(data_config.dataset_name, data_dir=data_config.data_dir)[   # type: ignore
-                data_config.tfds_split
+                data_config.ds_split
             ]
 
     dataset_info = data_config.dataset_info
@@ -141,8 +141,8 @@ def _resize(imgs, image_size):
     )
 
 
-def make_dataset_helper_unbalanced(
-    batch_size, image_size, num_labels, data_config: DatasetConfig, always_same_labels=False, sess=None
+def _make_dataset_helper_unbalanced(
+    batch_size, image_size, num_labels: int, data_config: DatasetConfig, always_same_labels=False, sess=None
 ):
     """Helper function for creating a dataset."""
     numpy_arr = _make_numpy_array(data_config, batch_size, sess)
@@ -175,15 +175,15 @@ def make_dataset_helper_unbalanced(
     return images, labels, classes, randomize_op
 
 
-def make_dataset_helper_balanced(
-    batch_sizes,
-    num_unlabeled_per_class,
+def _make_dataset_helper_balanced(
+    batch_sizes: list[int],
+    num_unlabeled_per_class: list[int],
     image_size,
-    num_labels,
+    num_labels: int,
     data_config: DatasetConfig,
     always_same_labels=False,
     sess=None,
-):
+) -> tuple[list[tuple[Any, Any, Any]], Any]:
     """Helper function for creating a balanced dataset."""
     numpy_arr = _make_numpy_array(data_config, NUMPY_BATCH_SIZE, sess)
     config = make_augmentation_config(data_config=data_config, num_labels=num_labels)
@@ -242,7 +242,7 @@ def make_dataset_unbalanced(model_config: LayerwiseModelConfig, data_config: Dat
     batch_size = model_config.num_transformer_samples
     batch_size += model_config.num_cnn_samples
 
-    images, labels, classes, randomize_op = make_dataset_helper_unbalanced(
+    images, labels, classes, randomize_op = _make_dataset_helper_unbalanced(
         batch_size=batch_size,
         image_size=model_config.image_size,
         num_labels=model_config.num_labels,
@@ -273,7 +273,11 @@ def make_dataset_unbalanced(model_config: LayerwiseModelConfig, data_config: Dat
     )
 
 
-def make_dataset_balanced(model_config: LayerwiseModelConfig, data_config: DatasetConfig, shuffle_labels=True):
+def make_dataset_balanced(
+    model_config: LayerwiseModelConfig,
+    data_config: DatasetConfig,
+    shuffle_labels=True,
+):
     """Creates data for Transformer and CNN.
 
     Arguments:
@@ -289,7 +293,7 @@ def make_dataset_balanced(model_config: LayerwiseModelConfig, data_config: Datas
     # Removing labels only from the Transformer batch.
     num_unlabeled_per_class = [data_config.num_unlabeled_per_class, 0]
 
-    batches, randomize_op = make_dataset_helper_balanced(
+    batches, randomize_op = _make_dataset_helper_balanced(
         batch_sizes=batch_sizes,
         num_unlabeled_per_class=num_unlabeled_per_class,
         image_size=model_config.image_size,
@@ -321,7 +325,12 @@ def make_dataset_balanced(model_config: LayerwiseModelConfig, data_config: Datas
     )
 
 
-def make_dataset(model_config: LayerwiseModelConfig, data_config: DatasetConfig, dataset_state=None, **kwargs):
+def make_dataset(
+    model_config: LayerwiseModelConfig,
+    data_config: DatasetConfig,
+    dataset_state: ModelState | None = None,
+    **kwargs,
+):
     """Makes dataset given dataset and model configuration."""
     augment = functools.partial(
         datasets.augment_images, augment_individually=data_config.augment_individually

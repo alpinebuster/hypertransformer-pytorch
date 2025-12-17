@@ -94,7 +94,7 @@ def remove_some_samples(labels, model_config, mask):
 class Generator:
     """Generic generator."""
 
-    def __init__(self, name, model_config: ModelConfig | LayerwiseModelConfig):
+    def __init__(self, name: str, model_config: LayerwiseModelConfig):
         self.name = name
         self.model_config = model_config
         self.num_weight_blocks = None
@@ -290,7 +290,7 @@ class SeparateGenerator(Generator):
                 weight_block_size=self.weight_block_size,
             )
 
-    def generate_weights(self, input_tensor, labels, mask=None, shared_features=None):
+    def generate_weights(self, input_tensor, labels, mask=None, shared_features=None, enable_fe_dropout=False):
         """Generates weights from the inputs."""
         del mask
         if self.transformer_io is None:
@@ -301,7 +301,7 @@ class SeparateGenerator(Generator):
                 'in the "separate" weight generator.'
             )
         with tf.variable_scope(f"builder_{self.name}"):
-            features = self._features(input_tensor, shared_features)
+            features = self._features(input_tensor, shared_features, enable_fe_dropout)
             weight_dim = self.transformer_io.embedding_dim + self.weight_block_size
             sample_dim = self.transformer_io.embedding_dim
             sample_dim += int(features.shape[1])
@@ -328,8 +328,9 @@ class SeparateGenerator(Generator):
 class BaseCNNLayer(tf.Module):
     """Base CNN layer used in our models."""
 
-    def __init__(self, name, model_config: ModelConfig | LayerwiseModelConfig, head_builder=None, var_reg_weight=None):
-        super(BaseCNNLayer, self).__init__(name=name)
+    def __init__(self, name: str, model_config: LayerwiseModelConfig, head_builder=None, var_reg_weight=None):
+        super().__init__(name=name)
+
         self.model_config = model_config
         self.num_labels = model_config.num_labels
         if var_reg_weight is None:
@@ -714,7 +715,7 @@ class LogitsLayer(BaseCNNLayer):
     """Logits layer of the CNN."""
 
     def __init__(
-        self, name, model_config: ModelConfig | LayerwiseModelConfig, num_features=None, fe_kernel_size=3, head_builder=None
+        self, name, model_config: LayerwiseModelConfig, num_features=None, fe_kernel_size=3, head_builder=None
     ):
         super(LogitsLayer, self).__init__(
             name=name,

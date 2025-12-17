@@ -94,7 +94,7 @@ def remove_some_samples(labels, model_config, mask):
 class Generator:
     """Generic generator."""
 
-    def __init__(self, name, model_config: ModelConfig | LayerwiseModelConfig):
+    def __init__(self, name, model_config: LayerwiseModelConfig):
         self.name = name
         self.model_config = model_config
         self.num_weight_blocks = None
@@ -328,7 +328,7 @@ class SeparateGenerator(Generator):
 class BaseCNNLayer(tf.Module):
     """Base CNN layer used in our models."""
 
-    def __init__(self, name, model_config: ModelConfig | LayerwiseModelConfig, head_builder=None, var_reg_weight=None):
+    def __init__(self, name, model_config: LayerwiseModelConfig, head_builder=None, var_reg_weight=None):
         super().__init__(name=name)
         self.model_config = model_config
         self.num_labels = model_config.num_labels
@@ -714,7 +714,7 @@ class LogitsLayer(BaseCNNLayer):
     """Logits layer of the CNN."""
 
     def __init__(
-        self, name, model_config: ModelConfig | LayerwiseModelConfig, num_features=None, fe_kernel_size=3, head_builder=None
+        self, name, model_config: LayerwiseModelConfig, num_features=None, fe_kernel_size=3, head_builder=None
     ):
         super().__init__(
             name=name,

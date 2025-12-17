@@ -6,6 +6,7 @@ from hypertransformer.core import util
 
 
 class UtilTest(tf.test.TestCase):
+
     def _encode_samples(self, batch_size, image_size, io):
         """Creates empty images and labels and encodes for Transformer."""
         images = tf.zeros(
@@ -60,4 +61,5 @@ class UtilTest(tf.test.TestCase):
 
 
 if __name__ == "__main__":
+    tf.disable_eager_execution()
     tf.test.main()

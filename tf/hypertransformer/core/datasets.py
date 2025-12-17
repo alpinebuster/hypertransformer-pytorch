@@ -3,7 +3,7 @@
 import dataclasses
 import functools
 
-from typing import Callable, Dict, Generator, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
 
 import numpy as np
 import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
@@ -118,14 +118,14 @@ def crop_and_resize(
                 extrapolation_value=extrapolation_value,
             )
         if squeeze:
-            r = r[0]
+            r = r[0] # type: ignore
         return r
 
     args = [images]
     if tree.is_nested(methods):
         args.append(methods)
     else:
-        resize_fn = functools.partial(resize_fn, resize_method=methods)
+        resize_fn = functools.partial(resize_fn, resize_method=methods) # type: ignore
     resize_fn = functools.partial(resize_fn, bboxes=bboxes)
     return tree.map_structure(resize_fn, *args)
 
@@ -193,7 +193,7 @@ def augment_images(
     )
 
 
-def get_dataset_info(dataset_name):
+def get_dataset_info(dataset_name: str):
     """Returns basic information about the dataset."""
     if dataset_name == "emnist":
         return DatasetInfo(
@@ -345,7 +345,7 @@ class AugmentationConfig:
         normalized = image / 128.0 - 1
         v_mean = tf.reduce_mean(normalized, axis=(1, 2), keepdims=True)
         mult, shift = (ALPHA_MAX - ALPHA_MIN) / 2, (ALPHA_MAX + ALPHA_MIN) / 2
-        alpha = mult * self.alpha.value + shift
+        alpha = mult * self.alpha.value + shift # type: ignore
         output = tf.math.tanh((normalized - v_mean) * alpha) / alpha
         output += v_mean
         return 255.0 * self._normalize(output)
@@ -374,13 +374,13 @@ class AugmentationConfig:
     def _aug_resize(self, images):
         """Resizes the image."""
         size = int(images.shape[1])
-        re_size = size * (1 - MAX_RESIZE / 2 + MAX_RESIZE * self.size.value / 2)
+        re_size = size * (1 - MAX_RESIZE / 2 + MAX_RESIZE * self.size.value / 2) # type: ignore
         images = tf.image.resize(images, [re_size, re_size])
         return tf.image.resize_with_crop_or_pad(images, size, size)
 
     def _aug_rotate_90(self, images):
         num_rotations = tf.cast(
-            tf.math.floor(self.rotate_90_times.value + 2.0), tf.int32
+            tf.math.floor(self.rotate_90_times.value + 2.0), tf.int32 # type: ignore
         )
         return tf.image.rot90(images, k=num_rotations)
 
@@ -438,8 +438,8 @@ class TaskGenerator:
 
     def __init__(
         self,
-        data: Dict[str, np.ndarray],
-        num_labels,
+        data: Dict[Any, np.ndarray],
+        num_labels: int,
         image_size,
         always_same_labels=False,
         use_label_subset=None,
@@ -453,7 +453,7 @@ class TaskGenerator:
         else:
             self.use_labels = list(self.data.keys())
 
-    def _labels_per_batch(self, batch_size):
+    def _labels_per_batch(self, batch_size: int):
         samples_per_label = batch_size // self.num_labels
         labels_with_extra = batch_size % self.num_labels
         output = []
@@ -464,7 +464,7 @@ class TaskGenerator:
                 output.append(samples_per_label)
         return output
 
-    def sample_random_labels(self, labels, batch_size, same_labels=None):
+    def sample_random_labels(self, labels, batch_size: int, same_labels=None):
         """Generator producing random labels and corr. numbers of samples."""
         if same_labels is None:
             same_labels = self.always_same_labels
@@ -505,7 +505,7 @@ class TaskGenerator:
             consecutive_label += 1
         return images, labels, classes
 
-    def _make_semisupervised_samples(self, batch_sizes, num_unlabeled_per_class):
+    def _make_semisupervised_samples(self, batch_sizes: list[int], num_unlabeled_per_class: list[int]):
         """Helper function for creating multiple semi-supervised samples."""
         output = []
         use_labels = self.use_labels
@@ -524,7 +524,7 @@ class TaskGenerator:
 
         return output
 
-    def _make_semisupervised_batches(self, batch_sizes, num_unlabeled_per_class):
+    def _make_semisupervised_batches(self, batch_sizes: list[int], num_unlabeled_per_class: list[int]):
         """Creates batches of semi-supervised samples."""
         batches = self._make_semisupervised_samples(
             batch_sizes, num_unlabeled_per_class
@@ -536,7 +536,7 @@ class TaskGenerator:
             output.extend([class_mat.astype(np.int32) for class_mat in classes])
         return tuple(output)
 
-    def _make_supervised_batch(self, batch_size):
+    def _make_supervised_batch(self, batch_size: int):
         """Creates a batch of supervised samples."""
         batches = self._make_semisupervised_samples([batch_size], [0])
         images, labels, classes = batches[0]
@@ -547,9 +547,9 @@ class TaskGenerator:
 
     def get_batches(
         self,
-        batch_sizes,
+        batch_sizes: list[int],
         config: AugmentationConfig,
-        num_unlabeled_per_class,
+        num_unlabeled_per_class: list[int],
     ):
         """Generator producing multiple separate balanced batches of data.
 
@@ -645,9 +645,9 @@ class TaskGenerator:
 def make_numpy_data(
     sess,
     ds,
-    batch_size,
-    num_labels,
-    samples_per_label,
+    batch_size: int,
+    num_labels: int,
+    samples_per_label: int,
     image_key="image",
     label_key="label",
     transpose=True,

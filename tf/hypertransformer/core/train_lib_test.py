@@ -8,6 +8,7 @@ from hypertransformer.core import train_lib
 
 
 class TrainLibTest(tf.test.TestCase):
+
     def test_make_dataset_helper(self):
         """Tests `make_dataset_helper` function."""
         batch_size = 32
@@ -51,4 +52,5 @@ class TrainLibTest(tf.test.TestCase):
 
 
 if __name__ == "__main__":
+    tf.disable_eager_execution()
     tf.test.main()

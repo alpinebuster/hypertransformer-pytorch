@@ -15,7 +15,7 @@ from hypertransformer.core import transformer
 TransformerParamsFn = Callable[[int], transformer.TransformerParams]
 
 
-def var_getter_wrapper(getter, name, *args, **kwargs):
+def var_getter_wrapper(getter, name: str, *args, **kwargs):
     """Convenient wrapper around CNN variable getters."""
     weights = kwargs.pop("_weights")
     shape = kwargs.get("shape")
@@ -208,13 +208,13 @@ class JointTransformerIO(TransformerIO):
             return weights
 
 
-def split_variable_name(name):
+def split_variable_name(name: str):
     """Extracts layer name and variable name from the full variable scope."""
     parts = name.split("/")
     return parts[-2], parts[-1]
 
 
-def _parse_label_spec(label_spec):
+def _parse_label_spec(label_spec: str):
     """Parses label specification."""
     labels = []
     parts = label_spec.split(",")
@@ -229,7 +229,7 @@ def _parse_label_spec(label_spec):
     return labels
 
 
-def parse_dataset_spec(dataset_spec):
+def parse_dataset_spec(dataset_spec: str):
     """Parses the dataset specification."""
     if ":" not in dataset_spec:
         return dataset_spec, None
@@ -254,7 +254,7 @@ def nonlinearity(activation):
         raise ValueError(f"Unknown nonlinearity {activation}.")
 
 
-def extract_checkpoint_step(s):
+def extract_checkpoint_step(s: str):
     # Files have format prefix-<step>.index
     return int(s.rsplit(".", 1)[0].rsplit("-", 1)[1])
 

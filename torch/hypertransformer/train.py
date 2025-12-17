@@ -272,8 +272,14 @@ def create_shared_head(shared_features, real_classes, real_class_min, real_class
     return loss, accuracy
 
 
-def create_layerwise_model(model_config, dataset, test_dataset, state, optim_config):
-    """Creates a hierarchichal Transformer-CNN model."""
+def create_layerwise_model(
+    model_config,
+    dataset: common_ht.DatasetSamples,
+    test_dataset: common_ht.DatasetSamples,
+    state,
+    optim_config,
+):
+    """Creates a hierarchical Transformer-CNN model."""
     tf.logging.info("Building the model")
     global_step = tf.train.get_or_create_global_step()
     model = layerwise.build_model(
@@ -454,17 +460,18 @@ def restore_shared_features():
 
 
 def train(
-    train_config,
-    optimizer_config,
-    dataset_config,
-    test_dataset_config,
-    layerwise_model_config,
+    train_config: common.TrainConfig,
+    optimizer_config: common.OptimizerConfig,
+    dataset_config: common_ht.DatasetConfig,
+    test_dataset_config: common_ht.DatasetConfig,
+    layerwise_model_config: common_ht.LayerwiseModelConfig,
 ):
     """Main function training the model."""
     state = train_lib.ModelState()
     tf.logging.info("Creating the dataset")
     dataset, dataset_state = train_lib.make_dataset(
-        model_config=layerwise_model_config, data_config=dataset_config
+        model_config=layerwise_model_config,
+        data_config=dataset_config,
     )
     test_dataset, _ = train_lib.make_dataset(
         model_config=layerwise_model_config,

@@ -13,6 +13,7 @@ def make_layerwise_model_config():
 
 
 class LayerwiseTest(tf.test.TestCase):
+
     def test_number_of_trained_cnn_layers_param_should_give_trained_weights(self):
         """Tests the layerswise model with both generated and trained weights."""
         tf.reset_default_graph()
@@ -106,4 +107,5 @@ class LayerwiseTest(tf.test.TestCase):
 
 
 if __name__ == "__main__":
+    tf.disable_eager_execution()
     tf.test.main()

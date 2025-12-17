@@ -14,6 +14,7 @@ import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pyli
 import tf_slim
 
 from hypertransformer import common_flags # pylint:disable=unused-import
+from hypertransformer.core import common_ht
 from hypertransformer import eval_model_flags # pylint:disable=unused-import
 from hypertransformer import train
 
@@ -59,7 +60,11 @@ def get_load_vars():
     return load_vars
 
 
-def run_evaluation(model_config, dataset_configs, make_outputs_fn):
+def run_evaluation(
+    model_config: common_ht.LayerwiseModelConfig,
+    dataset_configs: Dict[str, common_ht.DatasetConfig],
+    make_outputs_fn
+):
     """Runs model evaluation loop over a set of datasets."""
     is_metadataset = False
     dataset_info = {
@@ -140,7 +145,10 @@ def run_evaluation(model_config, dataset_configs, make_outputs_fn):
                 break
 
 
-def evaluate_layerwise(model_config, dataset_configs):
+def evaluate_layerwise(
+    model_config: common_ht.LayerwiseModelConfig,
+    dataset_configs: Dict[str, common_ht.DatasetConfig]
+):
     """Evaluates a pretrained 'layerwise' model."""
     model = layerwise.build_model(
         model_config.cnn_model_name, model_config=model_config

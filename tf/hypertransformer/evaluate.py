@@ -61,7 +61,11 @@ def get_load_vars():
     return load_vars
 
 
-def run_evaluation(model_config, dataset_configs, make_outputs_fn):
+def run_evaluation(
+    model_config: common_ht.LayerwiseModelConfig,
+    dataset_configs: Dict[str, common_ht.DatasetConfig],
+    make_outputs_fn,
+):
     """Runs model evaluation loop over a set of datasets."""
     is_metadataset = False
     dataset_info = {

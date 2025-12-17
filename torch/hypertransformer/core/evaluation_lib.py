@@ -9,6 +9,7 @@ import numpy as np
 import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 
 from hypertransformer.core import common
+from hypertransformer.core import common_ht
 from hypertransformer.core import layerwise
 from hypertransformer.core import train_lib
 
@@ -40,7 +41,10 @@ class EvaluationConfig:
     load_vars: Optional[VarList] = None
 
 
-def dataset_with_custom_labels(model_config, dataset_config):
+def dataset_with_custom_labels(
+    model_config: common_ht.LayerwiseModelConfig,
+    dataset_config: common_ht.DatasetConfig,
+):
     """Returns a dataset with a controlled label set (should be reshuffled)."""
     custom_labels = copy.copy(dataset_config.use_label_subset)
     dataset_config = dataclasses.replace(  # pytype: disable=wrong-arg-types  # dataclasses-replace-types
@@ -123,7 +127,7 @@ def evaluation_loop(
         )
 
 
-def apply_layerwise_model(model, model_config, dataset):
+def apply_layerwise_model(model, model_config: common_ht.LayerwiseModelConfig, dataset):
     """Applies a layerwise model to a dataset."""
     with tf.variable_scope("model"):
         weight_blocks = model.train(
@@ -139,7 +143,7 @@ def apply_layerwise_model(model, model_config, dataset):
     return common.ModelOutputs(predictions=pred_labels, accuracy=accuracy)
 
 
-def build_layerwise_model(model_config, dataset):
+def build_layerwise_model(model_config: common_ht.LayerwiseModelConfig, dataset):
     """Builds a layerwise model."""
     model = layerwise.build_model(
         model_config.cnn_model_name, model_config=model_config
