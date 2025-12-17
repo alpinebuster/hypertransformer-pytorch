@@ -1,6 +1,6 @@
 """Tests for `layerwise.py`."""
 
-import tensorflow.compat.v1 as tf  # pyright: ignore[reportMissingImports] # pylint:disable=import-error
+import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 
 from hypertransformer.core import common_ht
 from hypertransformer.core import layerwise
@@ -13,7 +13,6 @@ def make_layerwise_model_config():
 
 
 class LayerwiseTest(tf.test.TestCase):
-
     def test_number_of_trained_cnn_layers_param_should_give_trained_weights(self):
         """Tests the layerswise model with both generated and trained weights."""
         tf.reset_default_graph()

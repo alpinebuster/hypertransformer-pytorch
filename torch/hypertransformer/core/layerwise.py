@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 
 from hypertransformer.core import common_ht
+from hypertransformer.core.common_ht import ModelConfig, LayerwiseModelConfig
 from hypertransformer.core import feature_extractors
 from hypertransformer.core import transformer
 from hypertransformer.core import util
@@ -93,7 +94,7 @@ def remove_some_samples(labels, model_config, mask):
 class Generator:
     """Generic generator."""
 
-    def __init__(self, name, model_config):
+    def __init__(self, name, model_config: ModelConfig | LayerwiseModelConfig):
         self.name = name
         self.model_config = model_config
         self.num_weight_blocks = None
@@ -327,7 +328,7 @@ class SeparateGenerator(Generator):
 class BaseCNNLayer(tf.Module):
     """Base CNN layer used in our models."""
 
-    def __init__(self, name, model_config, head_builder=None, var_reg_weight=None):
+    def __init__(self, name, model_config: ModelConfig | LayerwiseModelConfig, head_builder=None, var_reg_weight=None):
         super().__init__(name=name)
         self.model_config = model_config
         self.num_labels = model_config.num_labels
@@ -421,7 +422,7 @@ class BaseCNNLayer(tf.Module):
 class LayerwiseModel(common_ht.Model):
     """Model specification including layer builders."""
 
-    def __init__(self, layers, model_config):
+    def __init__(self, layers, model_config: LayerwiseModelConfig):
         super().__init__()
         self.layers = layers
         self.shared_feature_extractor = feature_extractors.get_shared_feature_extractor(
@@ -713,7 +714,7 @@ class LogitsLayer(BaseCNNLayer):
     """Logits layer of the CNN."""
 
     def __init__(
-        self, name, model_config, num_features=None, fe_kernel_size=3, head_builder=None
+        self, name, model_config: ModelConfig | LayerwiseModelConfig, num_features=None, fe_kernel_size=3, head_builder=None
     ):
         super().__init__(
             name=name,

@@ -7,7 +7,7 @@ import os
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import tensorflow as tf2
-import tensorflow.compat.v1 as tf  # pyright: ignore[reportMissingImports] # pylint:disable=import-error
+import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 
 from hypertransformer.core import transformer
 

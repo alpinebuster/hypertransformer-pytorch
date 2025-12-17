@@ -1,12 +1,11 @@
 """Tests for `util.py`."""
 
-import tensorflow.compat.v1 as tf  # pyright: ignore[reportMissingImports] # pylint:disable=import-error
+import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 
 from hypertransformer.core import util
 
 
 class UtilTest(tf.test.TestCase):
-
     def _encode_samples(self, batch_size, image_size, io):
         """Creates empty images and labels and encodes for Transformer."""
         images = tf.zeros(

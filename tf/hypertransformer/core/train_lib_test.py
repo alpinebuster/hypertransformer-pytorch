@@ -1,14 +1,13 @@
 """Tests for `train_lib.py`."""
 
 import numpy as np
-import tensorflow.compat.v1 as tf  # pyright: ignore[reportMissingImports] # pylint:disable=import-error
+import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 
 from hypertransformer.core import common_ht as common
 from hypertransformer.core import train_lib
 
 
 class TrainLibTest(tf.test.TestCase):
-
     def test_make_dataset_helper(self):
         """Tests `make_dataset_helper` function."""
         batch_size = 32

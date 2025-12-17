@@ -12,6 +12,7 @@ import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pyli
 import tensorflow_datasets as tfds
 
 from hypertransformer.core import common_ht
+from hypertransformer.core.common_ht import LayerwiseModelConfig, DatasetConfig
 from hypertransformer.core import datasets
 
 NUMPY_BATCH_SIZE = 128
@@ -29,7 +30,7 @@ class DatasetState:
     meta_ds: Optional[Any] = None
 
 
-def make_augmentation_config(data_config, num_labels):
+def make_augmentation_config(data_config: DatasetConfig, num_labels):
     """Returns dataset augmentation configuration."""
     random_config = datasets.RandomizedAugmentationConfig(
         rotation_probability=data_config.rotation_probability,
@@ -53,11 +54,11 @@ def make_augmentation_config(data_config, num_labels):
         return datasets.AugmentationConfig(random_config=random_config)
 
 
-def _convert_bool(arr):
+def _convert_bool(arr: np.ndarray):
     return arr.astype(np.int8) * 255
 
 
-def _load_cache(data_config):
+def _load_cache(data_config: DatasetConfig):
     """Loads cached dataset from a saved NumPy array."""
     folder = os.path.join(data_config.cache_path, data_config.dataset_name)
     path = os.path.join(data_config.cache_path, data_config.dataset_name + ".npy")
@@ -94,7 +95,7 @@ def _load_cache(data_config):
     return None
 
 
-def _make_numpy_array(data_config, batch_size, sess=None):
+def _make_numpy_array(data_config: DatasetConfig, batch_size, sess=None):
     """Makes a NumPy array for given dataset configuration."""
     output = None
     if sess is None:
@@ -103,7 +104,7 @@ def _make_numpy_array(data_config, batch_size, sess=None):
     if ds is None:
         output = _load_cache(data_config)
         if output is None:
-            ds = tfds.load(data_config.dataset_name, data_dir=data_config.data_dir)[  # type: ignore
+            ds = tfds.load(data_config.dataset_name, data_dir=data_config.data_dir)[ # type: ignore
                 data_config.tfds_split
             ]
 
@@ -141,7 +142,7 @@ def _resize(imgs, image_size):
 
 
 def make_dataset_helper_unbalanced(
-    batch_size, image_size, num_labels, data_config, always_same_labels=False, sess=None
+    batch_size, image_size, num_labels, data_config: DatasetConfig, always_same_labels=False, sess=None
 ):
     """Helper function for creating a dataset."""
     numpy_arr = _make_numpy_array(data_config, batch_size, sess)
@@ -179,7 +180,7 @@ def make_dataset_helper_balanced(
     num_unlabeled_per_class,
     image_size,
     num_labels,
-    data_config,
+    data_config: DatasetConfig,
     always_same_labels=False,
     sess=None,
 ):
@@ -220,13 +221,13 @@ def make_dataset_helper_balanced(
     return output, randomize_op
 
 
-def _get_class_bounds(data_config):
+def _get_class_bounds(data_config: DatasetConfig):
     if data_config.use_label_subset is None or callable(data_config.use_label_subset):
         return None, None
     return min(data_config.use_label_subset), max(data_config.use_label_subset)
 
 
-def make_dataset_unbalanced(model_config, data_config, shuffle_labels=True):
+def make_dataset_unbalanced(model_config: LayerwiseModelConfig, data_config: DatasetConfig, shuffle_labels=True):
     """Creates data for Transformer and CNN.
 
     Arguments:
@@ -272,7 +273,7 @@ def make_dataset_unbalanced(model_config, data_config, shuffle_labels=True):
     )
 
 
-def make_dataset_balanced(model_config, data_config, shuffle_labels=True):
+def make_dataset_balanced(model_config: LayerwiseModelConfig, data_config: DatasetConfig, shuffle_labels=True):
     """Creates data for Transformer and CNN.
 
     Arguments:
@@ -320,7 +321,7 @@ def make_dataset_balanced(model_config, data_config, shuffle_labels=True):
     )
 
 
-def make_dataset(model_config, data_config, dataset_state=None, **kwargs):
+def make_dataset(model_config: LayerwiseModelConfig, data_config: DatasetConfig, dataset_state=None, **kwargs):
     """Makes dataset given dataset and model configuration."""
     augment = functools.partial(
         datasets.augment_images, augment_individually=data_config.augment_individually

@@ -6,7 +6,7 @@ import functools
 from typing import Callable, Dict, Generator, List, Optional, Tuple, Union
 
 import numpy as np
-import tensorflow.compat.v1 as tf  # pyright: ignore[reportMissingImports] # pylint:disable=import-error
+import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 from tensorflow_addons import image as tfi
 import tree
 
@@ -341,7 +341,7 @@ class AugmentationConfig:
         return (image - v_min) / (v_max - v_min + 1e-7)
 
     def _aug_contrast(self, image):
-        """Increses the image contrast."""
+        """Increases the image contrast."""
         normalized = image / 128.0 - 1
         v_mean = tf.reduce_mean(normalized, axis=(1, 2), keepdims=True)
         mult, shift = (ALPHA_MAX - ALPHA_MIN) / 2, (ALPHA_MAX + ALPHA_MIN) / 2
@@ -438,7 +438,7 @@ class TaskGenerator:
 
     def __init__(
         self,
-        data,
+        data: Dict[str, np.ndarray],
         num_labels,
         image_size,
         always_same_labels=False,
@@ -513,7 +513,7 @@ class TaskGenerator:
             use_labels = use_labels()
         if not self.always_same_labels:
             # Copying to avoid changing the original list
-            use_labels = use_labels[:]
+            use_labels = use_labels[:] # type: ignore
             np.random.shuffle(use_labels)
         for batch_size, unlabeled in zip(batch_sizes, num_unlabeled_per_class):
             # Using the same labelset in all batches.
@@ -548,7 +548,7 @@ class TaskGenerator:
     def get_batches(
         self,
         batch_sizes,
-        config,
+        config: AugmentationConfig,
         num_unlabeled_per_class,
     ):
         """Generator producing multiple separate balanced batches of data.
@@ -615,7 +615,7 @@ class TaskGenerator:
             output.append((images, labels, classes))
         return output
 
-    def get_batch(self, batch_size, config, num_unlabeled_per_class=0):
+    def get_batch(self, batch_size, config: AugmentationConfig, num_unlabeled_per_class=0):
         """Generator producing a single batch of data (meta-train + meta-test)."""
         if num_unlabeled_per_class > 0:
             raise ValueError(

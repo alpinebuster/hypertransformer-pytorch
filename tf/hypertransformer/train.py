@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from absl import app
 from absl import flags
 
-import tensorflow.compat.v1 as tf  # pyright: ignore[reportMissingImports] # pylint:disable=import-error
+import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 
 from hypertransformer import common_flags  # pylint:disable=unused-import
 from hypertransformer import eval_model_flags  # pylint:disable=unused-import

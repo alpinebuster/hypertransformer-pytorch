@@ -1,7 +1,7 @@
 """Tests for `datasets.py`."""
 
 import numpy as np
-import tensorflow.compat.v1 as tf  # pyright: ignore[reportMissingImports] # pylint:disable=import-error
+import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 
 from hypertransformer.core import datasets
 
