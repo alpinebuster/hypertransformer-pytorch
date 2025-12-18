@@ -58,10 +58,10 @@ class TrainState(object):
     init_op: Optional[tf.Operation] = None
     step_initializer: Optional[tf.Operation] = None
     update_op: tf.Operation = field(default_factory=tf.no_op)
-    small_summaries: Union[List[Any], Dict[Text, List[Any]]] = field(
+    small_summaries: Union[List[Any], Dict[Text, List[Any]], None] = field(
         default_factory=list
     )
-    large_summaries: Union[List[Any], Dict[Text, List[Any]]] = field(
+    large_summaries: Union[List[Any], Dict[Text, List[Any]], None] = field(
         default_factory=list
     )
 

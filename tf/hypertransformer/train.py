@@ -106,7 +106,7 @@ def make_layerwise_model_config():
     )
 
 
-def make_optimizer(optim_config, global_step):
+def make_optimizer(optim_config: common.OptimizerConfig, global_step):
     learning_rate = tf.train.exponential_decay(
         optim_config.learning_rate,
         global_step,
@@ -153,7 +153,7 @@ def make_dataset_config(dataset_spec=""):
     )
 
 
-def _default(new, default):
+def _default(new: float, default: float):
     return new if new >= 0 else default
 
 
@@ -272,7 +272,13 @@ def create_shared_head(shared_features, real_classes, real_class_min, real_class
     return loss, accuracy
 
 
-def create_layerwise_model(model_config, dataset, test_dataset, state, optim_config):
+def create_layerwise_model(
+    model_config: common_ht.LayerwiseModelConfig,
+    dataset: common_ht.DatasetSamples,
+    test_dataset: common_ht.DatasetSamples,
+    state,
+    optim_config: common.OptimizerConfig,
+):
     """Creates a hierarchichal Transformer-CNN model."""
     tf.logging.info("Building the model")
     global_step = tf.train.get_or_create_global_step()
@@ -388,7 +394,11 @@ def create_layerwise_model(model_config, dataset, test_dataset, state, optim_con
 
 
 def create_shared_feature_model(
-    model_config, dataset, test_dataset, state, optim_config
+    model_config: common_ht.LayerwiseModelConfig,
+    dataset: common_ht.DatasetSamples,
+    test_dataset: common_ht.DatasetSamples,
+    state: train_lib.ModelState,
+    optim_config: common.OptimizerConfig,
 ):
     """Creates an image feature extractor model for pre-training."""
     del test_dataset

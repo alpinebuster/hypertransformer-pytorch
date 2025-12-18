@@ -2,7 +2,7 @@
 
 import functools
 
-from hypertransformer.core import common_ht  # pylint:disable=unused-import
+from hypertransformer.core.common_ht import LayerwiseModelConfig
 from hypertransformer.core import layerwise
 
 ConvLayer = layerwise.ConvLayer
@@ -10,7 +10,7 @@ LogitsLayer = layerwise.LogitsLayer
 FlattenLogitsLayer = layerwise.FlattenLogitsLayer
 
 
-def maxpool_model(model_config, num_layers=4, last_maxpool=2):
+def maxpool_model(model_config: LayerwiseModelConfig, num_layers=4, last_maxpool=2):
     """Creates a larger 4-layer model (similar to the one in MAML paper)."""
     conv_args = {"model_config": model_config, "maxpool_size": 2, "padding": "same"}
     layers = [
@@ -26,7 +26,7 @@ def maxpool_model(model_config, num_layers=4, last_maxpool=2):
     return layerwise.LayerwiseModel(layers=layers, model_config=model_config)
 
 
-def avgpool_model(model_config, num_layers=1):
+def avgpool_model(model_config: LayerwiseModelConfig, num_layers=1):
     """Creates a basic 'layerwise' model."""
     layers = [
         ConvLayer(

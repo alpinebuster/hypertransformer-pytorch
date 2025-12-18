@@ -58,7 +58,7 @@ def dataset_with_custom_labels(
     return dataset, custom_labels
 
 
-def make_train_samples(dataset, same_batch=True):
+def make_train_samples(dataset: common_ht.DatasetSamples, same_batch=True):
     """Makes input samples for training a baseline model."""
     train_images = dataset.transformer_images
     train_labels = dataset.transformer_labels
@@ -88,7 +88,13 @@ def make_train_samples(dataset, same_batch=True):
     return train_images, train_labels, assign_op
 
 
-def evaluate_dataset(custom_labels, dataset, assign_op, outputs, eval_config):
+def evaluate_dataset(
+    custom_labels,
+    dataset: common_ht.DatasetSamples,
+    assign_op,
+    outputs,
+    eval_config: EvaluationConfig
+):
     """Runs evaluation loop for a specific dataset."""
     sess = tf.get_default_session()
     test_accs = {}
@@ -110,12 +116,12 @@ def evaluate_dataset(custom_labels, dataset, assign_op, outputs, eval_config):
 
 
 def evaluation_loop(
-    state,
+    state: common.TrainState,
     custom_labels,
-    dataset,
+    dataset: common_ht.DatasetSamples,
     assign_op,
     outputs,
-    eval_config,
+    eval_config: EvaluationConfig,
 ):
     """Model evaluation loop."""
     with tf.Session():
@@ -129,7 +135,11 @@ def evaluation_loop(
         )
 
 
-def apply_layerwise_model(model, model_config, dataset):
+def apply_layerwise_model(
+    model: layerwise.LayerwiseModel,
+    model_config: common_ht.LayerwiseModelConfig,
+    dataset: common_ht.DatasetSamples
+):
     """Applies a layerwise model to a dataset."""
     with tf.variable_scope("model"):
         weight_blocks = model.train(

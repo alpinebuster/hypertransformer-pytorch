@@ -4,9 +4,12 @@ import dataclasses
 import enum
 import functools
 
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional, Any
 
 import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
+
+if TYPE_CHECKING:
+    from hypertransformer.core.layerwise import GeneratedWeights
 
 
 @dataclasses.dataclass
@@ -22,10 +25,23 @@ class Model:
     def __init__(self):
         self.layer_outputs = {}
 
-    def train(self, inputs, labels):
+    def train(
+        self,
+        inputs,
+        labels,
+        mask: Optional[object] = None,
+        mask_random_samples: bool = False,
+        enable_fe_dropout: bool = False,
+        only_shared_feature: bool = False,
+    ):
         raise NotImplementedError
 
-    def evaluate(self, inputs, training=False):
+    def evaluate(
+        self,
+        inputs,
+        weight_blocks: "Optional[GeneratedWeights]" = None,
+        training: bool = False,
+    ):
         raise NotImplementedError
 
 

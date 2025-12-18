@@ -9,7 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 
 from hypertransformer.core import common_ht
-from hypertransformer.core.common_ht import ModelConfig, LayerwiseModelConfig
+from hypertransformer.core.common_ht import LayerwiseModelConfig
 from hypertransformer.core import feature_extractors
 from hypertransformer.core import transformer
 from hypertransformer.core import util
@@ -31,7 +31,7 @@ class GeneratedWeights:
     shared_features: Optional[tf.Tensor] = None
 
 
-def build_model(name, model_config):
+def build_model(name: str, model_config: common_ht.LayerwiseModelConfig) -> "LayerwiseModel":
     model_fn = models[name]
     return model_fn(model_config=model_config)
 
@@ -146,6 +146,10 @@ class JointGenerator(Generator):
         feature_size = int(features.shape[1])
         embedding_dim = self.transformer_io.embedding_dim
         input_embedding_size = feature_size + embedding_dim
+
+        if self.weight_block_size is None:
+            raise RuntimeError("weight_block_size must be set before calling _pad_features()")
+
         embedding_size = max(
             embedding_dim + self.weight_block_size, input_embedding_size
         )
@@ -300,6 +304,10 @@ class SeparateGenerator(Generator):
                 "Removing unlabeled samples is not currently supported "
                 'in the "separate" weight generator.'
             )
+
+        assert self.weight_block_size is not None, \
+        "weight_block_size must be set before calling _pad_features()"
+
         with tf.variable_scope(f"builder_{self.name}"):
             features = self._features(input_tensor, shared_features, enable_fe_dropout)
             weight_dim = self.transformer_io.embedding_dim + self.weight_block_size
@@ -423,8 +431,8 @@ class BaseCNNLayer(tf.Module):
 class LayerwiseModel(common_ht.Model):
     """Model specification including layer builders."""
 
-    def __init__(self, layers, model_config: LayerwiseModelConfig):
-        super(LayerwiseModel, self).__init__()
+    def __init__(self, layers: list[Any], model_config: LayerwiseModelConfig):
+        super().__init__()
         self.layers = layers
         self.shared_feature_extractor = feature_extractors.get_shared_feature_extractor(
             model_config
@@ -513,12 +521,15 @@ class LayerwiseModel(common_ht.Model):
         )
 
     def evaluate(
-        self,  # pytype: disable=signature-mismatch  # overriding-parameter-count-checks
+        self, # pytype: disable=signature-mismatch  # overriding-parameter-count-checks
         inputs,
-        weight_blocks,
+        weight_blocks=None,
         training=True,
     ):
         """Passes input tensors through a built CNN model."""
+        if weight_blocks is None:
+            raise ValueError("weight_blocks must be provided")
+
         self.layer_outputs = {}
         with tf.variable_scope("cnn"):
             for layer, layer_blocks in zip(self.layers, weight_blocks.weight_blocks):
@@ -597,9 +608,12 @@ class ConvLayer(BaseCNNLayer):
         maxpool_size=None,
         head_builder=None,
     ):
-        super(ConvLayer, self).__init__(
-            name=name, model_config=model_config, head_builder=head_builder
+        super().__init__(
+            name=name,
+            model_config=model_config,
+            head_builder=head_builder,
         )
+
         if generate_bn is None:
             generate_bn = model_config.generate_bn
         if generate_bias is None:
@@ -630,15 +644,15 @@ class ConvLayer(BaseCNNLayer):
         self.initialized = False
         self.act_after_bn = act_after_bn
 
-    def setup(self, tensor):
+    def setup(self, inputs):
         """Input-specific setup."""
-        self.input_dim = int(tensor.shape[-1])
+        self.input_dim = int(inputs.shape[-1])
         if self.num_features is None:
             self.num_features = max(self.output_dim, self.input_dim)
         self.compute_weight_sizes(self.model_config.weight_allocation)
         feature_extractor_class = functools.partial(
             feature_extractors.SimpleConvFeatureExtractor,
-            input_size=int(tensor.shape[1]),
+            input_size=int(inputs.shape[1]),
             feature_layers=self.feature_layers,
             feature_dim=self.num_features,
             kernel_size=self.kernel_size,
@@ -732,15 +746,15 @@ class LogitsLayer(BaseCNNLayer):
         self.input_dim = -1
         self.initialized = False
 
-    def setup(self, tensor):
+    def setup(self, inputs):
         """Input-specific setup."""
-        self.input_dim = int(tensor.shape[-1])
+        self.input_dim = int(inputs.shape[-1])
         if self.num_features is None:
             self.num_features = self.input_dim
         feature_extractor_class = functools.partial(
             feature_extractors.SimpleConvFeatureExtractor,
             feature_layers=1,
-            input_size=int(tensor.shape[1]),
+            input_size=int(inputs.shape[1]),
             feature_dim=self.num_features,
             nonlinear_feature=self.model_config.nonlinear_feature,
             kernel_size=self.fe_kernel_size,
@@ -760,6 +774,10 @@ class LogitsLayer(BaseCNNLayer):
     def var_getter(self, offsets, weights, shape, name):
         if weights is None:
             return None
+
+        assert self.generator.weight_block_size is not None, \
+        "weight_block_size must be set before calling _pad_features"
+
         if name.endswith("/kernel"):
             n = self.generator.weight_block_size - 1
             ws = [w[:n] for w in weights]
@@ -775,10 +793,10 @@ class LogitsLayer(BaseCNNLayer):
 class FlattenLogitsLayer(LogitsLayer):
     """Logits layer of the CNN that flattens its input (instead of averaging)."""
 
-    def setup(self, tensor):
+    def setup(self, inputs):
         """Input-specific setup."""
-        self.input_dim = int(tensor.shape[-1])
-        width, height = int(tensor.shape[1]), int(tensor.shape[2])
+        self.input_dim = int(inputs.shape[-1])
+        width, height = int(inputs.shape[1]), int(inputs.shape[2])
         if self.num_features is None:
             self.num_features = self.input_dim
         if self.model_config.logits_feature_extractor in ["", "default", "mix"]:
@@ -786,7 +804,7 @@ class FlattenLogitsLayer(LogitsLayer):
                 feature_extractors.SimpleConvFeatureExtractor,
                 feature_layers=1,
                 feature_dim=self.num_features,
-                input_size=int(tensor.shape[1]),
+                input_size=int(inputs.shape[1]),
                 nonlinear_feature=self.model_config.nonlinear_feature,
                 kernel_size=self.fe_kernel_size,
             )

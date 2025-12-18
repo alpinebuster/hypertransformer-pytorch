@@ -146,7 +146,10 @@ def run_evaluation(
                 break
 
 
-def evaluate_layerwise(model_config, dataset_configs):
+def evaluate_layerwise(
+    model_config: common_ht.LayerwiseModelConfig,
+    dataset_configs: Dict[str, common_ht.DatasetConfig],
+):
     """Evaluates a pretrained 'layerwise' model."""
     model = layerwise.build_model(
         model_config.cnn_model_name, model_config=model_config
@@ -182,7 +185,11 @@ def make_data_configs():
     return {name: _builder(name)(dataset) for name, dataset in datasets.items()}
 
 
-def evaluate_pretrained(train_config, optimizer_config, layerwise_model_config):
+def evaluate_pretrained(
+    train_config: common.TrainConfig,
+    optimizer_config: common.OptimizerConfig,
+    layerwise_model_config: common_ht.LayerwiseModelConfig,
+):
     """Evaluates a pre-trained model."""
     del train_config, optimizer_config
     data_configs = make_data_configs()
