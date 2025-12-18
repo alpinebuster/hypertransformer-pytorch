@@ -4,7 +4,7 @@ import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pyli
 
 from hypertransformer.core import common_ht
 from hypertransformer.core import layerwise
-from hypertransformer.core import layerwise_defs  # pylint:disable=unused-import
+from hypertransformer.core import layerwise_defs # pylint:disable=unused-import
 
 
 def make_layerwise_model_config():
@@ -15,7 +15,7 @@ def make_layerwise_model_config():
 class LayerwiseTest(tf.test.TestCase):
 
     def test_number_of_trained_cnn_layers_param_should_give_trained_weights(self):
-        """Tests the layerswise model with both generated and trained weights."""
+        """Tests the layerwise model with both generated and trained weights."""
         tf.reset_default_graph()
         model_config = make_layerwise_model_config()
         model_config.number_of_trained_cnn_layers = 1
@@ -29,10 +29,9 @@ class LayerwiseTest(tf.test.TestCase):
         for weight_block in weights.weight_blocks[1:]:
             self.assertIsNotNone(weight_block)
         model.evaluate(images, weight_blocks=weights)
-        self.assertIsInstance(
-            model.layers[0].conv.weights[0],
-            tf.Variable,
-            "First layer is trained directly and should be a" "Variable.",
+        self.assertTrue(
+            model.layers[0].conv.weights[0].trainable,
+            "First layer is trained directly and should be a Variable.",
         )
         self.assertIsInstance(
             model.layers[1].conv.weights[0],
@@ -42,7 +41,7 @@ class LayerwiseTest(tf.test.TestCase):
         )
 
     def test_negative_number_of_trained_cnn_layers_param_trains_last_layers(self):
-        """Tests the layerswise model with both generated and trained weights."""
+        """Tests the layerwise model with both generated and trained weights."""
         tf.reset_default_graph()
         model_config = make_layerwise_model_config()
         model_config.number_of_trained_cnn_layers = -1
@@ -56,9 +55,8 @@ class LayerwiseTest(tf.test.TestCase):
         for weight_block in weights.weight_blocks[:-2]:
             self.assertIsNotNone(weight_block)
         model.evaluate(images, weight_blocks=weights)
-        self.assertIsInstance(
-            model.layers[-2].conv.weights[0],
-            tf.Variable,
+        self.assertTrue(
+            model.layers[-2].conv.weights[0].trainable,
             "Last layer before the head is trained directly and "
             "should be a Variable.",
         )
