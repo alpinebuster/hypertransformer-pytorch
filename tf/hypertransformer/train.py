@@ -276,10 +276,10 @@ def create_layerwise_model(
     model_config: common_ht.LayerwiseModelConfig,
     dataset: common_ht.DatasetSamples,
     test_dataset: common_ht.DatasetSamples,
-    state,
+    state: train_lib.ModelState,
     optim_config: common.OptimizerConfig,
 ):
-    """Creates a hierarchichal Transformer-CNN model."""
+    """Creates a hierarchical Transformer-CNN model."""
     tf.logging.info("Building the model")
     global_step = tf.train.get_or_create_global_step()
     model = layerwise.build_model(
@@ -484,9 +484,9 @@ def train(
     )
     args = {
         "dataset": dataset,
+        "test_dataset": test_dataset,
         "state": state,
         "optim_config": optimizer_config,
-        "test_dataset": test_dataset,
     }
 
     if common_flags.PRETRAIN_SHARED_FEATURE.value:

@@ -121,7 +121,7 @@ def _is_not_empty(tensor):
     )  # pylint: disable=g-explicit-length-test
 
 
-def train(train_config: TrainConfig, state: TrainState, run_options=None):
+def train(train_config: TrainConfig, state: TrainState, run_options=None) -> None:
     """Train loop."""
     sess = tf.get_default_session()
 
@@ -185,11 +185,12 @@ def train(train_config: TrainConfig, state: TrainState, run_options=None):
             state.summary_writer.add_summary(
                 util.normalize_tags(results["large"]), global_step=step
             )
+
     # Final save.
     save()
 
 
-def init_training(state: TrainState):
+def init_training(state: TrainState) -> bool:
     """Initializes the training loop.
 
     Args:
@@ -200,10 +201,10 @@ def init_training(state: TrainState):
     """
     state.large_summaries = merge_summaries(
         state.large_summaries
-    )  # pytype: disable=annotation-type-mismatch
+    )
     state.small_summaries = merge_summaries(
         state.small_summaries
-    )  # pytype: disable=annotation-type-mismatch
+    )
     sess = tf.get_default_session()
     init_op = state.init_op
     if state.init_op is None:

@@ -339,7 +339,7 @@ def make_dataset_balanced(
 def make_dataset(
     model_config: LayerwiseModelConfig,
     data_config: DatasetConfig,
-    dataset_state: Optional[ModelState] = None,
+    dataset_state: Optional[DatasetState] = None,
     **kwargs,
 ):
     """Makes dataset given dataset and model configuration."""
