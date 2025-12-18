@@ -50,12 +50,7 @@ The evaluation script accepts the same parameters as the training script.
 
 ## Code Structure
 
-The code consists of two main folders:
-
-1. _tf_ — Tensorflow implementation.
-2. _torch_ — Pytorch implementation.
-
-The system is organized into several main modules:
+The code consists of several parts:
 
 1. _Task Generator_ — uses input dataset to generate _episodes_.
 2. _Transformer IO (Input)_ — receives a support batch (typically a few samples
