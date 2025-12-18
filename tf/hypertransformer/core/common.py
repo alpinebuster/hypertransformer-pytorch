@@ -26,7 +26,7 @@ field = dataclasses.field
 
 
 @dataclasses.dataclass
-class TrainConfig(object):
+class TrainConfig:
     """Training configuration."""
 
     train_steps: int = 10000
@@ -51,7 +51,7 @@ def get_default_saver():
 
 
 @dataclasses.dataclass
-class TrainState(object):
+class TrainState:
     """Model state."""
 
     train_op: tf.Tensor
@@ -78,7 +78,7 @@ class TrainState(object):
     per_step_fn: Optional[Callable[[tf.Tensor, Any, Any], None]] = None
     checkpoint_suffix: str = "model"
 
-    def __post_init__(self, record_graph_in_summary):
+    def __post_init__(self, record_graph_in_summary: bool):
         if self.summary_writer is None:
             self.summary_writer = get_default_summary_writer(
                 dump_graph=record_graph_in_summary
@@ -86,7 +86,7 @@ class TrainState(object):
 
 
 @dataclasses.dataclass
-class OptimizerConfig(object):
+class OptimizerConfig:
     """Optimizer configuration."""
 
     learning_rate: float = 1e-3

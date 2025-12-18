@@ -440,7 +440,7 @@ class TaskGenerator:
         self,
         data: Dict[Any, np.ndarray],
         num_labels: int,
-        image_size,
+        image_size: int,
         always_same_labels=False,
         use_label_subset=None,
     ):
@@ -550,7 +550,7 @@ class TaskGenerator:
         batch_sizes: list[int],
         config: AugmentationConfig,
         num_unlabeled_per_class: list[int],
-    ):
+    ) -> list[tuple[Any, Any, Any]]:
         """Generator producing multiple separate balanced batches of data.
 
         Arguments:
@@ -567,7 +567,7 @@ class TaskGenerator:
             num_unlabeled_per_class=num_unlabeled_per_class,
             batch_sizes=batch_sizes,
         )
-        # Returned array is [images, ..., labels, ..., images, ..., labels, ...]
+        # Returned array is [(images, labels, classes), ...]
         types = [tf.float32] * self.num_labels
         types += [tf.int32] * self.num_labels
         types += [tf.int32] * self.num_labels
@@ -615,7 +615,7 @@ class TaskGenerator:
             output.append((images, labels, classes))
         return output
 
-    def get_batch(self, batch_size, config: AugmentationConfig, num_unlabeled_per_class=0):
+    def get_batch(self, batch_size: int, config: AugmentationConfig, num_unlabeled_per_class=0) -> tuple[Any, Any, Any]:
         """Generator producing a single batch of data (meta-train + meta-test)."""
         if num_unlabeled_per_class > 0:
             raise ValueError(
@@ -652,7 +652,7 @@ def make_numpy_data(
     label_key="label",
     transpose=True,
     max_batches=None,
-):
+) -> Dict[int, np.ndarray]:
     """Makes a label-to-samples dictionary from the TF dataset.
 
     Arguments:
@@ -674,6 +674,12 @@ def make_numpy_data(
     examples = {i: [] for i in range(num_labels)}
     batch_index = 0
     while True:
+        """
+        {
+            "image": np.ndarray [B, H, W, C],
+            "label": np.ndarray [B],
+        }
+        """
         value = sess.run(data)
         samples = value[label_key].shape[0]
         for index in range(samples):

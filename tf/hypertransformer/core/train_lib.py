@@ -15,6 +15,7 @@ from hypertransformer.core import common_ht
 from hypertransformer.core.common_ht import LayerwiseModelConfig, DatasetConfig
 from hypertransformer.core import datasets
 
+# NOTE: `NUMPY_BATCH_SIZE` is the batch size used when pulling data from the TF Dataset to build the NumPy cache. It only affects preprocessing speed and memory usage, and does not affect the training batch or task structure.
 NUMPY_BATCH_SIZE = 128
 
 
@@ -58,7 +59,7 @@ def _convert_bool(arr: np.ndarray):
     return arr.astype(np.int8) * 255
 
 
-def _load_cache(data_config: DatasetConfig):
+def _load_cache(data_config: DatasetConfig) -> Optional[Dict[int, np.ndarray]]:
     """Loads cached dataset from a saved NumPy array."""
     folder = os.path.join(data_config.cache_path, data_config.dataset_name)
     path = os.path.join(data_config.cache_path, data_config.dataset_name + ".npy")
@@ -95,8 +96,11 @@ def _load_cache(data_config: DatasetConfig):
     return None
 
 
-def _make_numpy_array(data_config: DatasetConfig, batch_size: int, sess=None):
+def _make_numpy_array(data_config: DatasetConfig, batch_size: int, sess=None) -> Dict[int, np.ndarray]:
     """Makes a NumPy array for given dataset configuration."""
+    # Dict[int, np.ndarray]:
+    #   int -> Label
+    #   np.ndarray -> [Batch, W, H, C]
     output = None
     if sess is None:
         sess = tf.Session()
@@ -142,7 +146,12 @@ def _resize(imgs, image_size):
 
 
 def _make_dataset_helper_unbalanced(
-    batch_size, image_size, num_labels: int, data_config: DatasetConfig, always_same_labels=False, sess=None
+    batch_size: int,
+    image_size: int,
+    num_labels: int,
+    data_config: DatasetConfig,
+    always_same_labels=False,
+    sess=None,
 ):
     """Helper function for creating a dataset."""
     numpy_arr = _make_numpy_array(data_config, batch_size, sess)
@@ -242,6 +251,7 @@ def make_dataset_unbalanced(model_config: LayerwiseModelConfig, data_config: Dat
     batch_size = model_config.num_transformer_samples
     batch_size += model_config.num_cnn_samples
 
+    assert model_config.image_size
     images, labels, classes, randomize_op = _make_dataset_helper_unbalanced(
         batch_size=batch_size,
         image_size=model_config.image_size,
@@ -305,6 +315,7 @@ def make_dataset_balanced(
     transformer_images, transformer_labels, transformer_classes = batches[0]
     cnn_images, cnn_labels, cnn_classes = batches[1]
 
+    # NHWC
     if len(transformer_images.shape) == 3:
         transformer_images = tf.expand_dims(transformer_images, axis=-1)
     if len(cnn_images.shape) == 3:
@@ -328,7 +339,7 @@ def make_dataset_balanced(
 def make_dataset(
     model_config: LayerwiseModelConfig,
     data_config: DatasetConfig,
-    dataset_state: ModelState | None = None,
+    dataset_state: Optional[ModelState] = None,
     **kwargs,
 ):
     """Makes dataset given dataset and model configuration."""

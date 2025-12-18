@@ -259,7 +259,7 @@ def extract_checkpoint_step(s: str):
     return int(s.rsplit(".", 1)[0].rsplit("-", 1)[1])
 
 
-def find_latest_checkpoint(ckpt_dir):
+def find_latest_checkpoint(ckpt_dir: str):
     all_checkpoints = glob.glob(os.path.join(ckpt_dir, "*.index"))
     if not all_checkpoints:
         return None
@@ -267,7 +267,7 @@ def find_latest_checkpoint(ckpt_dir):
     return latest.rsplit(".", 1)[0]
 
 
-def latest_checkpoint(dir_or_checkpoint):
+def latest_checkpoint(dir_or_checkpoint: str):
     # That's actual checkpoint prefix.
     if not os.path.isdir(dir_or_checkpoint) and os.path.exists(
         dir_or_checkpoint + ".index"
@@ -279,16 +279,16 @@ def latest_checkpoint(dir_or_checkpoint):
     return latest or find_latest_checkpoint(dir_or_checkpoint)
 
 
-class MultiFileWriter(object):
+class MultiFileWriter:
     """Summary writer that supports writing to multiple files at once."""
 
-    def __init__(self, logdir, *args, **kwargs):
+    def __init__(self, logdir: str, *args, **kwargs):
         self.summary_args = list(args)
         self.summary_kwargs = dict(kwargs)
         self.logdir = logdir
         self.writers = {}
 
-    def _get_writer(self, name=None):
+    def _get_writer(self, name: Optional[str] = None):
         if name not in self.writers:
             self.writers[name] = tf.summary.FileWriter(
                 os.path.join(self.logdir, name or ""),
@@ -313,7 +313,7 @@ class MultiFileWriter(object):
             each.flush()
 
 
-def _normalize_tag(tag):
+def _normalize_tag(tag: str):
     if "_" not in tag:
         return tag
     normalized_tag, value = tag.rsplit("_", 1)
@@ -340,7 +340,7 @@ def normalize_tags(s):
     raise ValueError(f"Unexpected input {s}")
 
 
-def load_variables(loc, var_list=None, step=None):
+def load_variables(loc: str, var_list=None, step=None):
     """Returns variables from a given checkpoint."""
     path = latest_checkpoint(loc)
     if path is None:
