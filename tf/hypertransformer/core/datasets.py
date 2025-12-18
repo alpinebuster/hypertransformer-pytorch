@@ -7,7 +7,6 @@ from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
 
 import numpy as np
 import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
-from tensorflow_addons import image as tfi
 import tree
 
 from hypertransformer.core import common_ht
@@ -384,6 +383,120 @@ class AugmentationConfig:
         )
         return tf.image.rot90(images, k=num_rotations)
 
+    def _aug_rotate(self, images, angles, fill_value=0.):
+        """
+        images: Tensor, shape [B, H, W, C], dtype float32 (or castable)
+        angles: scalar Tensor (radians) or Tensor of shape [B], dtype float32
+        fill_value: scalar to use for pixels sampled outside source image
+
+        returns: rotated images, same shape as input
+        """
+        images = tf.cast(images, tf.float32)
+        shape = tf.shape(images)
+        batch = shape[0]
+        H = shape[1]
+        W = shape[2]
+        C = shape[3]
+
+        # Ensure angles is shape [B]
+        angles = tf.convert_to_tensor(angles, dtype=tf.float32)
+        angles = tf.reshape(angles, [-1])
+        angles = tf.cond(tf.equal(tf.size(angles), 1),
+                        lambda: tf.tile(angles, [batch]),
+                        lambda: angles)
+        angles = tf.reshape(angles, [batch])
+
+        # Grid of (x, y) coordinates in the output image
+        x_lin = tf.cast(tf.linspace(0.0, tf.cast(W, tf.float32) - 1.0, W), tf.float32)  # [W]
+        y_lin = tf.cast(tf.linspace(0.0, tf.cast(H, tf.float32) - 1.0, H), tf.float32)  # [H]
+        x_t, y_t = tf.meshgrid(x_lin, y_lin)  # [H, W]
+        x_flat = tf.reshape(x_t, [-1])  # [HW]
+        y_flat = tf.reshape(y_t, [-1])  # [HW]
+        HW = tf.shape(x_flat)[0]
+
+        # Coordinates relative to image center
+        cx = (tf.cast(W, tf.float32) - 1.0) / 2.0
+        cy = (tf.cast(H, tf.float32) - 1.0) / 2.0
+        x_rel = x_flat - cx  # [HW]
+        y_rel = y_flat - cy  # [HW]
+
+        # Above line is to satisfy graph shape inference; replace with tile:
+        x_rel = tf.tile(tf.expand_dims(x_rel, 0), [batch, 1])  # [B, HW]
+        y_rel = tf.tile(tf.expand_dims(y_rel, 0), [batch, 1])  # [B, HW]
+
+        # cos & sin per-batch, shape [B,1]
+        cos_a = tf.reshape(tf.cos(angles), [batch, 1])
+        sin_a = tf.reshape(tf.sin(angles), [batch, 1])
+
+        # Inverse mapping: source_coord = R_{-theta} * (out_coord - center) + center
+        # R_{-theta} = [[cos, sin], [-sin, cos]]
+        x_src = cos_a * x_rel + sin_a * y_rel + cx   # [B, HW]
+        y_src = -sin_a * x_rel + cos_a * y_rel + cy  # [B, HW]
+
+        # Bilinear interpolation
+        x0 = tf.floor(x_src)
+        x1 = x0 + 1.0
+        y0 = tf.floor(y_src)
+        y1 = y0 + 1.0
+
+        x0_safe = tf.cast(x0, tf.int32)
+        x1_safe = tf.cast(x1, tf.int32)
+        y0_safe = tf.cast(y0, tf.int32)
+        y1_safe = tf.cast(y1, tf.int32)
+
+        x0_clipped = tf.clip_by_value(x0_safe, 0, W - 1)
+        x1_clipped = tf.clip_by_value(x1_safe, 0, W - 1)
+        y0_clipped = tf.clip_by_value(y0_safe, 0, H - 1)
+        y1_clipped = tf.clip_by_value(y1_safe, 0, H - 1)
+
+        # Weights
+        wa = (x1 - x_src) * (y1 - y_src)  # top-left
+        wb = (x1 - x_src) * (x_src - x0)  # bottom-left
+        wc = (x_src - x0) * (y1 - y_src)  # top-right
+        wd = (x_src - x0) * (x_src - x0)  # bottom-right
+
+        # Correct bilinear weights: (x1 - x)*(y1 - y), (x1 - x)*(y - y0), (x - x0)*(y1 - y), (x - x0)*(y - y0)
+        wa = (x1 - x_src) * (y1 - y_src)
+        wb = (x1 - x_src) * (y_src - y0)
+        wc = (x_src - x0) * (y1 - y_src)
+        wd = (x_src - x0) * (y_src - y0)
+
+        # Build indices for gather_nd: shape [B*HW, 3] where each row is [b, y, x]
+        batch_idx = tf.reshape(tf.range(batch, dtype=tf.int32), [batch, 1])  # [B,1]
+        batch_idx = tf.tile(batch_idx, [1, HW])  # [B, HW]
+
+        def gather_at(x_inds, y_inds):
+            # x_inds, y_inds: [B, HW] int32
+            idx = tf.stack([tf.reshape(batch_idx, [-1]),
+                            tf.reshape(y_inds, [-1]),
+                            tf.reshape(x_inds, [-1])], axis=1)  # [B*HW, 3]
+            vals = tf.gather_nd(images, idx)  # [B*HW, C]
+            vals = tf.reshape(vals, [batch, HW, C])  # [B, HW, C]
+            return vals
+
+        Ia = gather_at(x0_clipped, y0_clipped)  # top-left
+        Ib = gather_at(x0_clipped, y1_clipped)  # bottom-left
+        Ic = gather_at(x1_clipped, y0_clipped)  # top-right
+        Id = gather_at(x1_clipped, y1_clipped)  # bottom-right
+
+        # Weights shapes: [B, HW] -> make [B, HW, 1]
+        wa = tf.expand_dims(wa, -1)
+        wb = tf.expand_dims(wb, -1)
+        wc = tf.expand_dims(wc, -1)
+        wd = tf.expand_dims(wd, -1)
+
+        out = wa * Ia + wb * Ib + wc * Ic + wd * Id  # [B, HW, C]
+
+        # Mask for points that were outside original image bounds (so we can fill with fill_value)
+        inside_x = tf.logical_and(x_src >= 0.0, x_src <= tf.cast(W, tf.float32) - 1.0)
+        inside_y = tf.logical_and(y_src >= 0.0, y_src <= tf.cast(H, tf.float32) - 1.0)
+        inside = tf.cast(tf.logical_and(inside_x, inside_y), tf.float32)  # [B, HW]
+        inside = tf.expand_dims(inside, -1)  # [B, HW, 1]
+
+        out = out * inside + fill_value * (1.0 - inside)
+        out = tf.reshape(out, [batch, H, W, C])
+        return out
+
     def process(self, images, index=None):
         """Processes a batch of samples."""
         if index is not None:
@@ -395,8 +508,8 @@ class AugmentationConfig:
             images = self._aug_rotate_90(images)
         if config.rotation_probability > 0.0:
             images = tf.cond(
-                self.rotate.value,
-                lambda: tfi.rotate(images, self.angle.value),
+                self.rotate.value, # radian
+                lambda: self._aug_rotate(images, self.angle.value),
                 lambda: tf.identity(images),
             )
         if config.roll_probability > 0.0:

@@ -3,6 +3,7 @@
         "absl",
         "hypertransformer",
         "layerwise",
+        "maxpool",
         "miniimagenet",
         "nohup",
         "omniglot",

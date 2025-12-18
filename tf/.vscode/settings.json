@@ -3,6 +3,7 @@
         "absl",
         "avgpool",
         "hypertransformer",
+        "keras",
         "layerwise",
         "lrelu",
         "maxpool",

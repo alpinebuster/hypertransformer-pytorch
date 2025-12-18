@@ -1690,6 +1690,29 @@ files = [
 ]
 
 [[package]]
+name = "kagglehub"
+version = "0.3.13"
+description = "Access Kaggle resources anywhere"
+optional = false
+python-versions = ">=3.9"
+files = [
+    {file = "kagglehub-0.3.13-py3-none-any.whl", hash = "sha256:e00dec8b81396cbad9c7b5eb62a33cf8ae27da26227abd196ed8f054c845ca00"},
+    {file = "kagglehub-0.3.13.tar.gz", hash = "sha256:d3c8b6250627d665096cd91a9487559bf5ed61be607eaf63d14511b20eea646e"},
+]
+
+[package.dependencies]
+packaging = "*"
+pyyaml = "*"
+requests = "*"
+tqdm = "*"
+
+[package.extras]
+hf-datasets = ["datasets", "pandas"]
+pandas-datasets = ["pandas"]
+polars-datasets = ["polars"]
+signing = ["betterproto (>=2.0.0b6)", "model-signing", "sigstore (>=3.6.1)"]
+
+[[package]]
 name = "keras"
 version = "2.15.0"
 description = "Deep learning for humans."
@@ -1699,6 +1722,48 @@ files = [
     {file = "keras-2.15.0-py3-none-any.whl", hash = "sha256:2dcc6d2e30cf9c951064b63c1f4c404b966c59caf09e01f3549138ec8ee0dd1f"},
     {file = "keras-2.15.0.tar.gz", hash = "sha256:81871d298c064dc4ac6b58440fdae67bfcf47c8d7ad28580fab401834c06a575"},
 ]
+
+[[package]]
+name = "keras-core"
+version = "0.1.7"
+description = "Multi-backend Keras."
+optional = false
+python-versions = ">=3.9"
+files = [
+    {file = "keras-core-0.1.7.tar.gz", hash = "sha256:a68580dc6910662026afdb5cda21e157f5163c6a77e86beae0e8d1de40234c07"},
+    {file = "keras_core-0.1.7-py3-none-any.whl", hash = "sha256:01f9f322d4b7e6e0a64d9cc3de022144ddf82ff88a0ac2b68e49f1a67d4a7ff0"},
+]
+
+[package.dependencies]
+absl-py = "*"
+dm-tree = "*"
+h5py = "*"
+namex = "*"
+numpy = "*"
+rich = "*"
+
+[[package]]
+name = "keras-cv"
+version = "0.9.0"
+description = "Industry-strength computer Vision extensions for Keras."
+optional = false
+python-versions = ">=3.9"
+files = [
+    {file = "keras_cv-0.9.0-py3-none-any.whl", hash = "sha256:507f0214cfba0a30e4c914d10bfac9b8ab39faeb30d4196993ddd02e31fccd7b"},
+    {file = "keras_cv-0.9.0.tar.gz", hash = "sha256:678e3447fdc0834d736b4bde8ef5950d53a1af4dd0c841f00edd8f8cd6e8e42f"},
+]
+
+[package.dependencies]
+absl-py = "*"
+kagglehub = "*"
+keras-core = "*"
+packaging = "*"
+regex = "*"
+tensorflow-datasets = "*"
+
+[package.extras]
+examples = ["matplotlib", "tensorflow-datasets"]
+tests = ["black[jupyter]", "flake8", "isort", "pycocotools", "pytest"]
 
 [[package]]
 name = "kiwisolver"
@@ -2192,6 +2257,17 @@ files = [
     {file = "murmurhash-1.0.15-cp39-cp39-win_amd64.whl", hash = "sha256:231dc7982e1aeae8bbab21f8f21953e3b9fb0a34e3ffe2d2342ff32e4f07af9d"},
     {file = "murmurhash-1.0.15-cp39-cp39-win_arm64.whl", hash = "sha256:a32054edb567417ac81f7172b7dd7731846f25c63084edeb20545fa7abc849d7"},
     {file = "murmurhash-1.0.15.tar.gz", hash = "sha256:58e2b27b7847f9e2a6edf10b47a8c8dd70a4705f45dccb7bf76aeadacf56ba01"},
+]
+
+[[package]]
+name = "namex"
+version = "0.1.0"
+description = "A simple utility to separate the implementation of your Python package and its public API surface."
+optional = false
+python-versions = "*"
+files = [
+    {file = "namex-0.1.0-py3-none-any.whl", hash = "sha256:e2012a474502f1e2251267062aae3114611f07df4224b6e06334c57b0f2ce87c"},
+    {file = "namex-0.1.0.tar.gz", hash = "sha256:117f03ccd302cc48e3f5c58a296838f6b89c83455ab8683a1e85f2a430aa4306"},
 ]
 
 [[package]]
@@ -5470,4 +5546,4 @@ gpu = ["onnx", "onnx-graphsurgeon", "onnxruntime", "onnxruntime-tools", "tensorf
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.11,<3.12"
-content-hash = "bc13d3dcd6c5022ae60d6a408cabd3d116ce876c6b8ba62cc21a7f467370ab37"
+content-hash = "5e52d94e6732c1e22a52d20b64a7f3ff4985774f5bf11d8e731f84de83a80241"
