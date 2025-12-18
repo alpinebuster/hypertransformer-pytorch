@@ -50,7 +50,12 @@ The evaluation script accepts the same parameters as the training script.
 
 ## Code Structure
 
-The code consists of several parts:
+The code consists of two main folders:
+
+1. _tf_ — Tensorflow implementation.
+2. _torch_ — Pytorch implementation.
+
+The system is organized into several main modules:
 
 1. _Task Generator_ — uses input dataset to generate _episodes_.
 2. _Transformer IO (Input)_ — receives a support batch (typically a few samples
@@ -63,9 +68,28 @@ The code consists of several parts:
 5. _CNN Model Builder_ — uses generated weight tensors to create a CNN
    (uses TFv1 variable getter mechanism for final weight generation).
 
-The model is trained end-to-end: 
-- (a) A batch of samples for a new episode is
-generated; 
-- (b) Support samples are passed to the Transformer, which generates a
-CNN; 
-- (c) Query samples are then passed through the generated CNN and the final CNN classification loss is used to train the Transformer.
+The model is trained end-to-end:
+```txt
+   ┌───────────────────────────┐
+   │ (a) Generate a batch of   │
+   │     samples for a new     │
+   │         episode           │
+   └─────────────┬─────────────┘
+                 │
+                 ▼
+   ┌───────────────────────────┐
+   │ (b) Pass support samples  │
+   │     to Transformer →      │
+   │     Transformer generates │
+   │           CNN             │
+   └─────────────┬─────────────┘
+                 │
+                 ▼
+   ┌───────────────────────────┐
+   │ (c) Pass query samples    │
+   │     through generated CNN │
+   │     and compute loss →    │
+   │     Backprop to train     │
+   │       Transformer         │
+   └───────────────────────────┘
+```
