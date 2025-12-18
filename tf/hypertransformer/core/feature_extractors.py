@@ -62,6 +62,7 @@ class SimpleConvFeatureExtractor(FeatureExtractor):
                 if int(tensor.shape[1]) < self.kernel_size:
                     break
                 tensor = conv(tensor)
+                feature = tensor
                 if not self.nonlinear_feature:
                     feature = tensor
                 # While the output is not employing nonlinearity, layer-to-layer

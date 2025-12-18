@@ -19,7 +19,7 @@ NUMPY_BATCH_SIZE = 128
 
 
 @dataclasses.dataclass
-class ModelState(object):
+class ModelState:
     """Model state."""
 
     loss: Optional[tf.Tensor] = None
