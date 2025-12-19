@@ -5777,4 +5777,4 @@ gpu = ["onnx", "onnx-graphsurgeon", "onnxruntime", "onnxruntime-tools", "tensorf
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.12"
-content-hash = "ff9d64fdd99b6975a65ec4700e5181ef4a107c021493f67bc0adfc6bf459c318"
+content-hash = "6eda33c1d0d99ceb9870ed2dad7e7d695dedce164204d8ad947b1e7914dca33a"
