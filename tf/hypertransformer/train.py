@@ -515,8 +515,9 @@ def main(argv):
     if len(argv) > 1:
         raise app.UsageError("Too many command-line arguments.")
 
-    tf.disable_eager_execution()
+    print(f"FLAGS: {FLAGS.flag_values_dict()}")
 
+    tf.disable_eager_execution()
     for gpu in tf.config.list_physical_devices("GPU"):
         tf.config.experimental.set_memory_growth(gpu, True)
 

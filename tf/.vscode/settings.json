@@ -12,9 +12,11 @@
         "miniimagenet",
         "NHWC",
         "omniglot",
+        "opencv",
         "preds",
         "pytype",
         "semisupervised",
+        "tensorrt",
         "tieredimagenet"
     ]
 }

@@ -27,7 +27,7 @@ class SimpleConvFeatureExtractor(FeatureExtractor):
         name,
         nonlinear_feature=False,
         kernel_size=3,
-        input_size=0,
+        input_size: Optional[int] = None,
         padding="valid",
     ):
         super().__init__(name=name)
@@ -35,6 +35,8 @@ class SimpleConvFeatureExtractor(FeatureExtractor):
         self.convs = []
         def_stride = 2
         self.kernel_size = kernel_size
+
+        assert input_size
         if input_size < kernel_size:
             self.kernel_size = input_size
             def_stride = 1
