@@ -31,7 +31,7 @@ absl-py = "^2.3.1"
 dm-tree = "^0.1.9"
 opencv-python = "^4.11.0.86"
 numpy = "^1.26.4" # Because tensorflow[and-cuda] (2.15.1) depends on numpy (>=1.23.5,<2.0.0)
-tensorflow = {extras = ["and-cuda"], version = "^2.15.1"} # `tf.layers.* works` will NOT on versions further
+tensorflow = {extras = ["and-cuda"], version = "2.15.1"} # `tf.layers.* works` will NOT on versions further
 tensorflow-datasets = "^4.9.9"
 tf-slim = "^1.1.0"
 tensorrt = { version = "^10.14.1.48.post1", optional = true }
