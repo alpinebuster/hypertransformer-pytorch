@@ -30,7 +30,7 @@ class SimpleConvFeatureExtractor(FeatureExtractor):
         input_size=0,
         padding="valid",
     ):
-        super(SimpleConvFeatureExtractor, self).__init__(name=name)
+        super().__init__(name=name)
         self.nonlinear_feature = nonlinear_feature
         self.convs = []
         def_stride = 2
@@ -87,7 +87,7 @@ class SharedMultilayerFeatureExtractor(FeatureExtractor):
         padding="valid",
         use_bn=False,
     ):
-        super(SharedMultilayerFeatureExtractor, self).__init__(name=name)
+        super().__init__(name=name)
         self.feature_dim = feature_dim
         self.convs = []
         self.bns = []
@@ -115,7 +115,7 @@ class SharedMultilayerFeatureExtractor(FeatureExtractor):
             return tf.reduce_mean(tensor, axis=(-2, -3))
 
 
-def fe_multi_layer(config, num_layers=2, use_bn=False):
+def fe_multi_layer(config: LayerwiseModelConfig, num_layers=2, use_bn=False):
     return SharedMultilayerFeatureExtractor(
         feature_layers=num_layers,
         feature_dim=config.shared_features_dim,
@@ -136,7 +136,7 @@ class PassthroughFeatureExtractor(FeatureExtractor):
     """Passthrough feature extractor."""
 
     def __init__(self, name, input_size=None, wrap_class=None):
-        super(PassthroughFeatureExtractor, self).__init__(name=name)
+        super().__init__(name=name)
         self.name = name
         if wrap_class is not None:
             self.wrap_feature_extractor = wrap_class(name=name)
