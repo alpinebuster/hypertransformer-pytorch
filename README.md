@@ -21,13 +21,15 @@ performance.
 ```sh
 # cd ./tf/
 cd ./torch/
-poetry install --no-root
+poetry install
 
 poetry env activate
 # or
 source $(poetry env info -p)/bin/activate
 # or
 . $(poetry env info -p)/bin/activate
+
+poetry env remove --all
 ```
 
 ## Code Structure

@@ -515,7 +515,7 @@ def main(argv):
     if len(argv) > 1:
         raise app.UsageError("Too many command-line arguments.")
 
-    print(f"FLAGS: {FLAGS.flag_values_dict()}")
+    print(f"\nFLAGS: {FLAGS.flag_values_dict()}\n")
 
     tf.disable_eager_execution()
     for gpu in tf.config.list_physical_devices("GPU"):

@@ -7,7 +7,7 @@ license = "AGPL-3.0-or-later"
 readme = "README.md"
 classifiers = [
     "Development Status :: 5 - Production/Stable",
-    "Topic :: Communications :: Tor",
+    "Topic :: CS :: CV",
 ]
 # packages = [
 #     { include = "tf" },

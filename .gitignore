@@ -11,3 +11,4 @@ tieredimagenet
 
 *.log
 *.pkl
+test*.py

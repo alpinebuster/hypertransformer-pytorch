@@ -24,7 +24,7 @@ class SimpleConvFeatureExtractor(FeatureExtractor):
         self,
         feature_layers,
         feature_dim,
-        name,
+        name: str,
         nonlinear_feature=False,
         kernel_size=3,
         input_size: Optional[int] = None,
@@ -113,25 +113,9 @@ class SharedMultilayerFeatureExtractor(FeatureExtractor):
             tensor = input_tensor
             for conv, bn in zip(self.convs, self.bns):
                 tensor = conv(tensor)
+                # FIXME: set `training=True` ?
                 tensor = bn(tensor) if bn is not None else tensor
             return tf.reduce_mean(tensor, axis=(-2, -3))
-
-
-def fe_multi_layer(config: LayerwiseModelConfig, num_layers=2, use_bn=False):
-    return SharedMultilayerFeatureExtractor(
-        feature_layers=num_layers,
-        feature_dim=config.shared_features_dim,
-        name="shared_features",
-        padding=config.shared_feature_extractor_padding,
-        use_bn=use_bn,
-    )
-
-
-class FeatureExtractorClass(Protocol):
-    """Type declaring feature extractor builder class."""
-
-    def __call__(self, *, name, **kwargs):
-        ...
 
 
 class PassthroughFeatureExtractor(FeatureExtractor):
@@ -151,6 +135,16 @@ class PassthroughFeatureExtractor(FeatureExtractor):
             wrapped = self.wrap_feature_extractor(input_tensor)
             output = tf.concat([output, wrapped], axis=-1)
         return output
+
+
+def fe_multi_layer(config: LayerwiseModelConfig, num_layers=2, use_bn=False):
+    return SharedMultilayerFeatureExtractor(
+        feature_layers=num_layers,
+        feature_dim=config.shared_features_dim,
+        name="shared_features",
+        padding=config.shared_feature_extractor_padding,
+        use_bn=use_bn,
+    )
 
 
 feature_extractors = {
