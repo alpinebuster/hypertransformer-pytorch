@@ -26,12 +26,12 @@ url = "https://pypi.nvidia.com"
 priority = "explicit"
 
 [tool.poetry.dependencies]
-python = ">=3.11,<4"
+python = ">=3.11,<3.12" # `dm-tree` requires <=3.11 to be compatible with numpy
 absl-py = "^2.3.1"
 dm-tree = "^0.1.9"
-opencv-python = "^4.12.0.88"
-numpy = "^2.1.3"
-tensorflow = {extras = ["and-cuda"], version = "^2.19.0"}
+opencv-python = "^4.11.0.86"
+numpy = "^1.26.4" # Because tensorflow[and-cuda] (2.15.1) depends on numpy (>=1.23.5,<2.0.0)
+tensorflow = {extras = ["and-cuda"], version = "^2.15.1"} # `tf.layers.* works` will NOT on versions further
 tensorflow-datasets = "^4.9.9"
 tf-slim = "^1.1.0"
 tensorrt = { version = "^10.14.1.48.post1", optional = true }
@@ -39,7 +39,7 @@ tensorrt = { version = "^10.14.1.48.post1", optional = true }
 tensorrt-cu13-libs = { version = "^10.14.1", source = "nvidia", optional = true }
 pandas = "^2.3.3"
 matplotlib = "^3.10.8"
-tensorboard = "^2.20.0"
+tensorboard = "^2.15.2"
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^7.1.0"

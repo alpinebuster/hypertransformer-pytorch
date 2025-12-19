@@ -16,6 +16,7 @@
         "preds",
         "pytype",
         "semisupervised",
+        "tensorboard",
         "tensorrt",
         "tieredimagenet"
     ]
