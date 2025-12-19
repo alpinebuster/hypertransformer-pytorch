@@ -36,7 +36,7 @@ def build_model(name: str, model_config: common_ht.LayerwiseModelConfig) -> "Lay
     return model_fn(model_config=model_config)
 
 
-def get_remove_probability(max_probability):
+def get_remove_probability(max_probability: float):
     """Returns a random probability between 0 and `max_probability`."""
     return tf.random.uniform(shape=(), dtype=tf.float32) * max_probability
 
@@ -47,7 +47,7 @@ def get_l2_regularizer(weight=None):
     return tf.keras.regularizers.L2(l2=weight)
 
 
-def remove_some_samples(labels, model_config, mask):
+def remove_some_samples(labels, model_config: LayerwiseModelConfig, mask):
     """Returns a random label mask removing some labeled and unlabeled samples."""
     if (
         model_config.max_prob_remove_unlabeled <= 0.0
@@ -160,7 +160,7 @@ class JointGenerator(Generator):
             paddings = tf.constant([[0, 0], [0, pad_size]])
             return tf.pad(features, paddings, "CONSTANT"), embedding_size
 
-    def get_transformer_params(self, embedding_size):
+    def get_transformer_params(self, embedding_size: int):
         """Returns Transformer parameters."""
         num_heads = self.model_config.heads
 
@@ -464,7 +464,9 @@ class LayerwiseModel(common_ht.Model):
 
         if only_shared_feature:
             return GeneratedWeights(
-                weight_blocks=[], head_weight_blocks={}, shared_features=shared_features
+                weight_blocks=[],
+                head_weight_blocks={},
+                shared_features=shared_features,
             )
 
         if mask_random_samples:
@@ -521,7 +523,7 @@ class LayerwiseModel(common_ht.Model):
         )
 
     def evaluate(
-        self, # pytype: disable=signature-mismatch  # overriding-parameter-count-checks
+        self,
         inputs,
         weight_blocks=None,
         training=True,
@@ -729,9 +731,14 @@ class LogitsLayer(BaseCNNLayer):
     """Logits layer of the CNN."""
 
     def __init__(
-        self, name, model_config: LayerwiseModelConfig, num_features=None, fe_kernel_size=3, head_builder=None
+        self,
+        name: str,
+        model_config: LayerwiseModelConfig,
+        num_features: Optional[int] = None,
+        fe_kernel_size=3,
+        head_builder=None,
     ):
-        super(LogitsLayer, self).__init__(
+        super().__init__(
             name=name,
             model_config=model_config,
             head_builder=head_builder,

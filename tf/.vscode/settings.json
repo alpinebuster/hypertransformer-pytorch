@@ -1,7 +1,9 @@
 {
     "cSpell.words": [
         "absl",
+        "accs",
         "avgpool",
+        "embs",
         "hypertransformer",
         "keras",
         "layerwise",
@@ -9,6 +11,8 @@
         "maxpool",
         "miniimagenet",
         "NHWC",
+        "omniglot",
+        "preds",
         "pytype",
         "semisupervised",
         "tieredimagenet"

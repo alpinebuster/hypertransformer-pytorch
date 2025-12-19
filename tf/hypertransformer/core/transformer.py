@@ -22,7 +22,7 @@ class TransformerParams:
        internal_dim: dimension of the embedding in pointwise layer
        num_layers: number of transformer layers
        value_dim: the dimension of the value embedding (defaults to query_key_dim)
-       mha_output_dim: the dimension of the final output of pointwise layer
+       mha_output_dim: the dimension of the final output of pointwise layer (Multi-Head Attention)
        heads: number of heads in multi-head attention value_dim and query_key_dim
          need to be divisible by
        dropout_rate: dropout applied to the output of each transformer block

@@ -4,7 +4,7 @@ import functools
 import glob
 import os
 
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable, Optional
 
 import tensorflow as tf2
 import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
@@ -79,7 +79,7 @@ class TransformerIO(tf.Module):
 
     def __init__(
         self,
-        num_labels,
+        num_labels: int,
         num_weights,
         weight_block_size,
         embedding_dim=8,
@@ -243,7 +243,7 @@ def parse_dataset_spec(dataset_spec: str):
     return dataset_spec, _parse_label_spec(label_spec)
 
 
-def nonlinearity(activation):
+def nonlinearity(activation: str):
     if activation == "relu":
         return tf.nn.relu
     elif activation == "gelu":

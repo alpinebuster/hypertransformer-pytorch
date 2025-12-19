@@ -1,14 +1,13 @@
 """Training binary."""
 
 import functools
-from typing import Any, Dict, List, Optional, Tuple
 
 from absl import app
 from absl import flags
 
 import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 
-from hypertransformer import common_flags  # pylint:disable=unused-import
+from hypertransformer import common_flags
 from hypertransformer import eval_model_flags  # pylint:disable=unused-import
 
 from hypertransformer.core import common
@@ -282,32 +281,35 @@ def create_layerwise_model(
     """Creates a hierarchical Transformer-CNN model."""
     tf.logging.info("Building the model")
     global_step = tf.train.get_or_create_global_step()
-    model = layerwise.build_model(
-        model_config.cnn_model_name, model_config=model_config
+    model_builder = layerwise.build_model(
+        model_config.cnn_model_name,
+        model_config=model_config,
     )
 
     with tf.variable_scope("model"):
-        weight_blocks = model.train(
+        weight_blocks = model_builder.train(
             dataset.transformer_images,
             dataset.transformer_labels,
             mask=dataset.transformer_masks,
             mask_random_samples=True,
             enable_fe_dropout=True,
         )
-        predictions = model.evaluate(
-            dataset.cnn_images, weight_blocks=weight_blocks, training=False
+        predictions = model_builder.evaluate(
+            dataset.cnn_images,
+            weight_blocks=weight_blocks,
+            training=False,
         )
         heads = []
         if model_config.train_heads:
-            outputs = model.layer_outputs.values()
+            outputs = model_builder.layer_outputs.values()
             heads = [output[1] for output in outputs if output[1] is not None]
 
-        test_weight_blocks = model.train(
+        test_weight_blocks = model_builder.train(
             test_dataset.transformer_images,
             test_dataset.transformer_labels,
             mask=test_dataset.transformer_masks,
         )
-        test_predictions = model.evaluate(
+        test_predictions = model_builder.evaluate(
             test_dataset.cnn_images, weight_blocks=test_weight_blocks, training=False
         )
 
@@ -404,12 +406,12 @@ def create_shared_feature_model(
     del test_dataset
     tf.logging.info("Building the model")
     global_step = tf.train.get_or_create_global_step()
-    model = layerwise.build_model(
+    model_builder = layerwise.build_model(
         model_config.cnn_model_name, model_config=model_config
     )
 
     with tf.variable_scope("model"):
-        weight_blocks = model.train(
+        weight_blocks = model_builder.train(
             dataset.transformer_images,
             dataset.transformer_labels,
             mask=dataset.transformer_masks,
