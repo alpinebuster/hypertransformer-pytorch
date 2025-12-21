@@ -137,7 +137,7 @@ def _make_numpy_array(data_config: DatasetConfig, batch_size: int, sess=None) ->
     return output
 
 
-def _resize(imgs, image_size):
+def _resize(imgs, image_size: int):
     if len(imgs.shape) < 4:
         imgs = tf.expand_dims(imgs, axis=-1)
     return tf.image.resize_images(

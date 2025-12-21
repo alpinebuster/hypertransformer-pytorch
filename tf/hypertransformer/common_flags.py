@@ -251,7 +251,7 @@ flags.DEFINE_bool(
 flags.DEFINE_enum(
     "shared_feature_extractor",
     "none",
-    ["none", "2-layer", "3-layer", "4-layer"],
+    ["none", "2-layer", "3-layer", "4-layer", "2-layer-bn", "3-layer-bn"],
     "Shared feature extractor model.",
 )
 flags.DEFINE_integer(

@@ -126,10 +126,12 @@ class Generator:
                 features = dropout(features, training=True)
         else:
             features = None
+
         if shared_features is not None:
             if features is not None:
                 return tf.concat([features, shared_features], axis=-1)
             return shared_features
+
         if features is None:
             raise RuntimeError(
                 "Layerwise model should have at least one of "
@@ -341,15 +343,19 @@ class BaseCNNLayer(tf.Module):
 
         self.model_config = model_config
         self.num_labels = model_config.num_labels
+
         if var_reg_weight is None:
             var_reg_weight = model_config.var_reg_weight
         self.var_reg_weight = var_reg_weight
+
         self.feature_extractor = None
         self.head = None
+
         if head_builder is not None and self.model_config.train_heads:
             self.head = head_builder(
                 name="head_" + self.name, model_config=self.model_config
             )
+
         if model_config.generator == "joint":
             self.generator = JointGenerator(
                 name=self.name + "_generator", model_config=self.model_config
@@ -358,6 +364,7 @@ class BaseCNNLayer(tf.Module):
             self.generator = SeparateGenerator(
                 name=self.name + "_generator", model_config=self.model_config
             )
+
         self.getter_dict = {}
         self.initialized = False
 
@@ -385,8 +392,10 @@ class BaseCNNLayer(tf.Module):
             self.setup(input_tensor)
             self.generate_weights = generate_weights
             self.initialized = True
+
         if not self.generate_weights:
             return None
+
         return self.generator.generate_weights(
             input_tensor=input_tensor,
             labels=labels,
@@ -471,6 +480,7 @@ class LayerwiseModel(common_ht.Model):
 
         if mask_random_samples:
             mask = remove_some_samples(labels, self.model_config, mask)
+
         num_trained_layers = abs(self._number_of_trained_cnn_layers)
         # Last layer is always a LogitsLayer and we always generate it.
         num_generated_layers = len(self.layers) - num_trained_layers - 1
@@ -479,6 +489,7 @@ class LayerwiseModel(common_ht.Model):
                 "num_trained_layers should be smaller that the total "
                 "number of conv layers."
             )
+
         is_first_trained = self._number_of_trained_cnn_layers >= 0
         if is_first_trained:
             generate_weights_per_layers = (
@@ -488,6 +499,7 @@ class LayerwiseModel(common_ht.Model):
             generate_weights_per_layers = (
                 [True] * num_generated_layers + [False] * num_trained_layers + [True]
             )
+
         for layer, generate_weights in zip(self.layers, generate_weights_per_layers):
             with tf.variable_scope("cnn_builder"):
                 weight_blocks = layer.create(
@@ -516,6 +528,7 @@ class LayerwiseModel(common_ht.Model):
                         enable_fe_dropout=enable_fe_dropout,
                     )
                     all_head_blocks[layer.name] = head_blocks
+
         return GeneratedWeights(
             weight_blocks=all_weight_blocks,
             head_weight_blocks=all_head_blocks,

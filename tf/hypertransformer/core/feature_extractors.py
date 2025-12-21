@@ -113,8 +113,7 @@ class SharedMultilayerFeatureExtractor(FeatureExtractor):
             tensor = input_tensor
             for conv, bn in zip(self.convs, self.bns):
                 tensor = conv(tensor)
-                # FIXME: set `training=True` ?
-                tensor = bn(tensor) if bn is not None else tensor
+                tensor = bn(tensor, training=training) if bn is not None else tensor
             return tf.reduce_mean(tensor, axis=(-2, -3))
 
 

@@ -252,7 +252,7 @@ def create_shared_head(shared_features, real_classes, real_class_min, real_class
     if real_class_min is None or real_class_max is None:
         tf.logging.warning(
             "Training classes boundaries are not provided. "
-            "Skippin shared head creation!"
+            "Skipping shared head creation!"
         )
         return None, None
     total_classes = real_class_max - real_class_min + 1
@@ -515,7 +515,7 @@ def main(argv):
     if len(argv) > 1:
         raise app.UsageError("Too many command-line arguments.")
 
-    print(f"\nFLAGS: {FLAGS.flag_values_dict()}\n")
+    tf.logging.info(f"\nFLAGS: {FLAGS.flag_values_dict()}\n")
 
     tf.disable_eager_execution()
     for gpu in tf.config.list_physical_devices("GPU"):

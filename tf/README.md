@@ -42,6 +42,7 @@ They can be executed as follows:
 
 ```shell
 ./scripts/omniglot_1shot_v1.sh --data_numpy_dir=./data_numpy_dir --train_log_dir=./logs
+tensorboard --logdir=../omniglot/logs
 ```
 
 The evaluation script `evaluate_model.py` can be executed in parallel to

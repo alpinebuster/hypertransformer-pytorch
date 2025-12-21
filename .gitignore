@@ -9,6 +9,7 @@ tiered_imagenet
 miniimagenet
 tieredimagenet
 
+*.zip
 *.log
 *.pkl
 test*.py

@@ -628,6 +628,7 @@ class TaskGenerator:
             # Copying to avoid changing the original list
             use_labels = use_labels[:] # type: ignore
             np.random.shuffle(use_labels)
+
         for batch_size, unlabeled in zip(batch_sizes, num_unlabeled_per_class):
             # Using the same labelset in all batches.
             label_generator = functools.partial(
