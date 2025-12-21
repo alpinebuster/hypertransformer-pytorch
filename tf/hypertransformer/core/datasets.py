@@ -553,13 +553,11 @@ class TaskGenerator:
         self,
         data: Dict[Any, np.ndarray],
         num_labels: int,
-        image_size: int,
         always_same_labels=False,
         use_label_subset=None,
     ):
         self.data = data
         self.num_labels = num_labels
-        self.image_size = (image_size, image_size)
         self.always_same_labels = always_same_labels
         if use_label_subset is not None:
             self.use_labels = use_label_subset

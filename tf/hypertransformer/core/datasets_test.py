@@ -89,7 +89,7 @@ class DatasetsTest(tf.test.TestCase):
         """Tests image and label generation in the `TaskGenerator`."""
         batch_size, image_size = 8, 4
         data = self._make_data(batch_size=batch_size, image_size=image_size)
-        gen = datasets.TaskGenerator(data, num_labels=4, image_size=image_size)
+        gen = datasets.TaskGenerator(data, num_labels=4)
         aug_config = datasets.AugmentationConfig(
             random_config=datasets.RandomizedAugmentationConfig(
                 rotation_probability=0.0,

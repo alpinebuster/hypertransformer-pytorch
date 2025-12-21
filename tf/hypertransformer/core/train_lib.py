@@ -161,7 +161,6 @@ def _make_dataset_helper_unbalanced(
         gen = datasets.TaskGenerator(
             numpy_arr,
             num_labels=num_labels,
-            image_size=image_size,
             use_label_subset=data_config.use_label_subset,
             always_same_labels=always_same_labels,
         )
@@ -201,7 +200,6 @@ def _make_dataset_helper_balanced(
         gen = datasets.TaskGenerator(
             numpy_arr,
             num_labels=num_labels,
-            image_size=image_size,
             use_label_subset=data_config.use_label_subset,
             always_same_labels=always_same_labels,
         )
