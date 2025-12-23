@@ -3,8 +3,6 @@
 import os
 import pickle
 
-from typing import Dict, List, Sequence, Tuple
-
 from absl import app
 from absl import flags
 

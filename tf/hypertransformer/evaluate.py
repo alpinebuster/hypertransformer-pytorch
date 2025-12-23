@@ -3,7 +3,7 @@
 import functools
 import os
 
-from typing import Callable, Dict, List
+from typing import Dict
 
 from absl import app
 from absl import flags
@@ -52,12 +52,14 @@ def get_load_vars():
     """Returns a list of variables to load from the checkpoint."""
     tf.train.get_or_create_global_step()
     load_vars = []
+
     for v in tf.all_variables():
         if v.name.startswith("augmentation"):
             continue
         if "train_images" in v.name or "train_labels" in v.name:
             continue
         load_vars.append(v)
+
     return load_vars
 
 
@@ -73,7 +75,8 @@ def run_evaluation(
         for name, config in dataset_configs.items()
     }
 
-    datasets, custom_labels, assign_ops, outputs = {}, {}, {}, {}
+    datasets: Dict[str, common_ht.DatasetSamples] = {}
+    custom_labels, assign_ops, outputs = {}, {}, {}
     for name, info in dataset_info.items():
         datasets[name], custom_labels[name] = info
         if not is_metadataset:

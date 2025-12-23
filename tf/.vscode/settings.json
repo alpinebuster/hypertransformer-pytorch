@@ -5,6 +5,7 @@
         "avgpool",
         "convs",
         "embs",
+        "evals",
         "gelu",
         "hypertransformer",
         "keras",

@@ -44,7 +44,7 @@ class EvaluationConfig:
 def dataset_with_custom_labels(
     model_config: common_ht.LayerwiseModelConfig,
     dataset_config: common_ht.DatasetConfig,
-):
+) -> tuple[common_ht.DatasetSamples, Optional[List[int]]]:
     """Returns a dataset with a controlled label set (should be reshuffled)."""
     custom_labels = copy.copy(dataset_config.use_label_subset)
     dataset_config = dataclasses.replace( # pytype: disable=wrong-arg-types  # dataclasses-replace-types
@@ -92,26 +92,30 @@ def evaluate_dataset(
     custom_labels,
     dataset: common_ht.DatasetSamples,
     assign_op,
-    outputs,
+    outputs: common.ModelOutputs,
     eval_config: EvaluationConfig
-):
+) -> Accuracies:
     """Runs evaluation loop for a specific dataset."""
     sess = tf.get_default_session()
     test_accs = {}
     all_accs = []
+
     for task_num in range(eval_config.num_task_evals):
         if custom_labels:
             np.random.shuffle(custom_labels)
+
         sess.run(dataset.randomize_op)
         # Assign op should be executed last for us to have the same augmentation
         # and labels for both Transformer and CNN samples
         if assign_op is not None:
             sess.run(assign_op)
+
         accs = []
         for _ in range(eval_config.num_eval_batches):
             accs.append(sess.run(outputs.accuracy))
         test_accs[task_num] = accs
         all_accs.append(np.mean(accs))
+
     return test_accs, all_accs
 
 
@@ -120,7 +124,7 @@ def evaluation_loop(
     custom_labels,
     dataset: common_ht.DatasetSamples,
     assign_op,
-    outputs,
+    outputs: common.ModelOutputs,
     eval_config: EvaluationConfig,
 ):
     """Model evaluation loop."""
@@ -152,10 +156,14 @@ def apply_layerwise_model(
     pred_labels = tf.cast(tf.argmax(predictions, axis=-1), tf.int32)
     accuracy = tf.cast(tf.math.equal(dataset.cnn_labels, pred_labels), tf.float32)
     accuracy = tf.reduce_sum(accuracy) / model_config.num_cnn_samples
+
     return common.ModelOutputs(predictions=pred_labels, accuracy=accuracy)
 
 
-def build_layerwise_model(model_config, dataset):
+def build_layerwise_model(
+    model_config: common_ht.LayerwiseModelConfig,
+    dataset: common_ht.DatasetSamples,
+):
     """Builds a layerwise model."""
     model = layerwise.build_model(
         model_config.cnn_model_name, model_config=model_config
@@ -163,7 +171,11 @@ def build_layerwise_model(model_config, dataset):
     return apply_layerwise_model(model, model_config=model_config, dataset=dataset)
 
 
-def evaluate_layerwise(model_config, dataset_config, eval_config):
+def evaluate_layerwise(
+    model_config: common_ht.LayerwiseModelConfig,
+    dataset_config: common_ht.DatasetConfig,
+    eval_config: EvaluationConfig,
+):
     """Evaluates a pretrained 'layerwise' model."""
     dataset, custom_labels = dataset_with_custom_labels(model_config, dataset_config)
     images, labels, assign_op = make_train_samples(dataset, same_batch=True)

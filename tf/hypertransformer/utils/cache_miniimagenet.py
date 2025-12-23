@@ -4,7 +4,7 @@ import dataclasses
 import os
 import pickle
 
-from typing import Any, Dict, Sequence
+from typing import Any, Dict
 
 from absl import app
 from absl import flags

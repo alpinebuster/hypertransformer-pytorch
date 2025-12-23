@@ -422,8 +422,13 @@ class BaseCNNLayer(tf.Module):
         separate_bn_variables=False,
         **kwargs,
     ):
-        """Applies created layer to the input tensor."""
+        """Applies created layer to the input tensor.
+
+        Attributes:
+           Position parameters → *args → Keyword-only parameters → **kwargs
+        """
         assert self.initialized
+
         variable_getter = functools.partial(
             util.var_getter_wrapper,
             _cnn_var_getter=self.var_getter,
@@ -438,6 +443,7 @@ class BaseCNNLayer(tf.Module):
         with tf.variable_scope(
             self.name, reuse=tf.AUTO_REUSE, custom_getter=variable_getter
         ):
+            # Equal to call `self.__call__(...)`
             return self(input_tensor, *args, **kwargs)
 
 

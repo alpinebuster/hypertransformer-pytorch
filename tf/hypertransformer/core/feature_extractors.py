@@ -2,10 +2,10 @@
 
 import functools
 
-from typing import Any, Optional
+from typing import Optional
+import typing_extensions
 
 import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
-import typing_extensions
 
 from hypertransformer.core import common_ht  # pylint:disable=unused-import
 from hypertransformer.core.common_ht import LayerwiseModelConfig
@@ -18,7 +18,15 @@ class FeatureExtractor(tf.Module):
 
 
 class SimpleConvFeatureExtractor(FeatureExtractor):
-    """Simple convolutional feature extractor."""
+    """Simple convolutional feature extractor.
+
+    Extract and splice multi-layer features layer by layer, e.g.:
+      Input ([B, H, W, C])
+      ├─ Conv1 → GAP (Global Average Pooling) → f1 ([B, C])
+      ├─ Conv2 → GAP → f2 ([B, C])
+      ├─ Conv3 → GAP → f3 ([B, C])
+      └─ concat(f1, f2, f3) ([B, [f1_1, ..., f1_C, f2_1, ..., f2_C, f3_1, ..., f3_C]])
+    """
 
     def __init__(
         self,
@@ -85,7 +93,21 @@ class SimpleConvFeatureExtractor(FeatureExtractor):
 
 
 class SharedMultilayerFeatureExtractor(FeatureExtractor):
-    """Simple shared convolutional feature extractor."""
+    """Simple shared convolutional feature extractor.
+
+    Just like a standard CNN, it only outputs the last layer of features, e.g.:
+      Input ([B, H, W, C_in])
+        ↓
+      Conv1 ([B, H/2^(1-1), W/2^(1-1), feature_dim])
+        ↓
+      Conv2 ([B, H/2^(2-1), W/2^(2-1), feature_dim])
+        ↓
+      Conv3 ([B, H/2^(3-1), W/2^(3-1), feature_dim])
+        ↓
+      GAP ([B, H', W', feature_dim] -> [B, feature_dim])
+        ↓
+      Features ([B, feature_dim])
+    """
 
     def __init__(
         self,
@@ -130,7 +152,15 @@ class SharedMultilayerFeatureExtractor(FeatureExtractor):
 
 
 class PassthroughFeatureExtractor(FeatureExtractor):
-    """Passthrough feature extractor."""
+    """Passthrough feature extractor.
+
+    No feature extraction is performed, only the input is expanded, e.g.
+      Input
+      ├─ Flatten -> (size: [B, HWC])
+      └─ wrap_feature_extractor(Input) -> (size: [B, D])
+          ↓
+        concat -> (size: [B, HWC + D])
+    """
 
     def __init__(self, name, input_size=None, wrap_class=None):
         super().__init__(name=name)

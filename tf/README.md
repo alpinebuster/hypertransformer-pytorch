@@ -41,13 +41,13 @@ Folder `scripts` contains several training scripts for `omniglot`,
 They can be executed as follows:
 
 ```shell
-./scripts/omniglot_1shot_v1.sh --data_numpy_dir=./data_numpy_dir --train_log_dir=./logs
+./scripts/omniglot_1shot_v1.sh --data_numpy_dir=../omniglot/cache --train_log_dir=../omniglot/logs
 tensorboard --logdir=../omniglot/logs
 ```
 
-The evaluation script `evaluate.py` can be executed in parallel to
-evaluate produced checkpoints while the model is being trained.
-The evaluation script accepts the same parameters as the training script.
+> The evaluation script `evaluate.py` can be executed in parallel to
+> evaluate produced checkpoints while the model is being trained.
+> The evaluation script accepts the **same parameters** as the training script.
 
 ## Code Structure
 
