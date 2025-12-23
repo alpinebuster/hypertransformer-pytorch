@@ -22,8 +22,8 @@ class SimpleConvFeatureExtractor(FeatureExtractor):
 
     def __init__(
         self,
-        feature_layers,
-        feature_dim,
+        feature_layers: int,
+        feature_dim: int, # Number of Conv2D filters
         name: str,
         nonlinear_feature=False,
         kernel_size=3,
@@ -31,6 +31,7 @@ class SimpleConvFeatureExtractor(FeatureExtractor):
         padding="valid",
     ):
         super().__init__(name=name)
+
         self.nonlinear_feature = nonlinear_feature
         self.convs = []
         def_stride = 2
@@ -40,39 +41,45 @@ class SimpleConvFeatureExtractor(FeatureExtractor):
         if input_size < kernel_size:
             self.kernel_size = input_size
             def_stride = 1
-        if feature_dim > 0:
-            for idx, layer in enumerate(range(feature_layers)):
-                stride = def_stride if idx < feature_layers - 1 else 1
-                self.convs.append(
-                    tf.layers.Conv2D(
-                        filters=feature_dim,
-                        kernel_size=(self.kernel_size, self.kernel_size),
-                        strides=(stride, stride),
-                        padding=padding,
-                        activation=None,
-                        name=f"layer_{layer + 1}",
-                    )
+
+        assert feature_dim > 0
+        for idx, layer in enumerate(range(feature_layers)):
+            # The first `feature_layers - 1` convolutional layers use a stride of 2 to progressively reduce the spatial dimensions,
+            # while the final layer uses a stride of `1` to extract features without additional downsampling.
+            stride = def_stride if idx < feature_layers - 1 else 1
+            self.convs.append(
+                tf.layers.Conv2D(
+                    filters=feature_dim,
+                    kernel_size=(self.kernel_size, self.kernel_size),
+                    strides=(stride, stride),
+                    padding=padding,
+                    activation=None,
+                    name=f"layer_{layer + 1}",
                 )
+            )
 
     def __call__(self, input_tensor):
         if not self.convs:
             return None
+
         with tf.variable_scope(None, default_name=self.name):
             tensor = input_tensor
             outputs = []
+
             for conv in self.convs:
                 if int(tensor.shape[1]) < self.kernel_size:
                     break
+
                 tensor = conv(tensor)
                 feature = tensor
-                if not self.nonlinear_feature:
-                    feature = tensor
+
                 # While the output is not employing nonlinearity, layer-to-layer
                 # transformations use it.
                 tensor = tf.nn.relu(tensor)
                 if self.nonlinear_feature:
                     feature = tensor
                 outputs.append(feature)
+
             outputs = [tf.reduce_mean(tensor, axis=(1, 2)) for tensor in outputs]
             return tf.concat(outputs, axis=-1)
 
@@ -82,25 +89,30 @@ class SharedMultilayerFeatureExtractor(FeatureExtractor):
 
     def __init__(
         self,
-        feature_layers,
-        feature_dim,
-        name,
-        kernel_size=3,
-        padding="valid",
-        use_bn=False,
+        feature_layers: int,
+        feature_dim: int,
+        name: str,
+        kernel_size: int = 3,
+        padding: str = "valid",
+        use_bn: bool = False,
     ):
         super().__init__(name=name)
+
         self.feature_dim = feature_dim
         self.convs = []
         self.bns = []
+        self.kernel_size = kernel_size
+
         assert feature_dim > 0
         for idx, layer in enumerate(range(feature_layers)):
+            # The first `feature_layers - 1` convolutional layers use a stride of 2 to progressively reduce the spatial dimensions, 
+            # while the final layer uses a stride of `1` to extract features without additional downsampling.
             stride = 2 if idx < feature_layers - 1 else 1
             self.bns.append(tf.layers.BatchNormalization() if use_bn else None)
             self.convs.append(
                 tf.layers.Conv2D(
                     filters=feature_dim,
-                    kernel_size=(kernel_size, kernel_size),
+                    kernel_size=(self.kernel_size, self.kernel_size),
                     strides=(stride, stride),
                     padding=padding,
                     activation=tf.nn.relu,

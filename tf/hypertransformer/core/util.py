@@ -255,7 +255,7 @@ def nonlinearity(activation: str):
 
 
 def extract_checkpoint_step(s: str):
-    # Files have format prefix-<step>.index
+    # Files have format `prefix-<step>.index`
     return int(s.rsplit(".", 1)[0].rsplit("-", 1)[1])
 
 
@@ -263,6 +263,7 @@ def find_latest_checkpoint(ckpt_dir: str):
     all_checkpoints = glob.glob(os.path.join(ckpt_dir, "*.index"))
     if not all_checkpoints:
         return None
+
     latest = sorted(all_checkpoints, key=extract_checkpoint_step)[0]
     return latest.rsplit(".", 1)[0]
 
@@ -273,6 +274,7 @@ def latest_checkpoint(dir_or_checkpoint: str):
         dir_or_checkpoint + ".index"
     ):
         return dir_or_checkpoint
+
     # Rely on tensorflow latest_checkpoint but if no "checkpoint" is present just
     # scan the directory.
     latest = tf.train.latest_checkpoint(dir_or_checkpoint)
@@ -345,6 +347,7 @@ def load_variables(loc: str, var_list=None, step=None):
     path = latest_checkpoint(loc)
     if path is None:
         raise FileNotFoundError(f'No checkpoint available found at "{loc}"')
+
     loc = path
     if step is not None:
         base, _ = loc.rsplit("-", 1)
@@ -356,4 +359,5 @@ def load_variables(loc: str, var_list=None, step=None):
     result = {}
     for tensor in var_list or ckpt.get_variable_to_shape_map():
         result[tensor] = ckpt.get_tensor(tensor)
+
     return result

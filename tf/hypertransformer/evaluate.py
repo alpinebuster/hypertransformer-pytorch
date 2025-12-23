@@ -9,7 +9,7 @@ from absl import app
 from absl import flags
 
 import numpy as np
-import tensorflow.compat.v1 as tf  # type: ignore
+import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 
 import tf_slim
 

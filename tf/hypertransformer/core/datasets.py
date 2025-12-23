@@ -575,16 +575,18 @@ class TaskGenerator:
                 output.append(samples_per_label)
         return output
 
-    def sample_random_labels(self, labels, batch_size: int, same_labels=None):
+    def sample_random_labels(self, labels, batch_size: int, same_labels: Optional[bool]=None):
         """Generator producing random labels and corr. numbers of samples."""
         if same_labels is None:
             same_labels = self.always_same_labels
+
         if same_labels:
             chosen_labels = labels[: self.num_labels]
         else:
             chosen_labels = np.random.choice(
                 labels, size=self.num_labels, replace=False
             )
+
         samples_per_label = batch_size // self.num_labels
         labels_with_extra = batch_size % self.num_labels
         for i, label in enumerate(chosen_labels):
@@ -601,17 +603,17 @@ class TaskGenerator:
         """Produces labels and images from the label generator."""
         images, labels, classes = [], [], []
         consecutive_label = 0
-        for label, samples in label_generator():
+        for label, num_samples in label_generator():
             sample = self.data[label]
             chosen = np.random.choice(
-                range(sample.shape[0]), size=samples, replace=False
+                range(sample.shape[0]), size=num_samples, replace=False
             )
             images.append(sample[chosen, :, :])
-            chosen_labels = np.array([consecutive_label] * samples)
-            remove_label = [(i < unlabeled) for i in range(samples)]
+            chosen_labels = np.array([consecutive_label] * num_samples)
+            remove_label = [(i < unlabeled) for i in range(num_samples)]
             # This indicates that the sample does not have a label.
             chosen_labels[remove_label] = self.num_labels
-            classes.append(np.array([label] * samples))
+            classes.append(np.array([label] * num_samples))
             labels.append(chosen_labels)
             consecutive_label += 1
         return images, labels, classes
@@ -679,7 +681,8 @@ class TaskGenerator:
             num_unlabeled_per_class=num_unlabeled_per_class,
             batch_sizes=batch_sizes,
         )
-        # Returned array is [(images, labels, classes), ...]
+        #                   [   |------------------------------------------batch 1--------------------------------|        , ...]
+        # Returned array is [image-1, ..., image-num_labels, label-1, ..., label-num_labels, class-1, ..., class-num_labels, ...]
         types = [tf.float32] * self.num_labels
         types += [tf.int32] * self.num_labels
         types += [tf.int32] * self.num_labels

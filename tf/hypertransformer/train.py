@@ -405,9 +405,11 @@ def create_shared_feature_model(
     """Creates an image feature extractor model for pre-training."""
     del test_dataset
     tf.logging.info("Building the model")
+
     global_step = tf.train.get_or_create_global_step()
     model_builder = layerwise.build_model(
-        model_config.cnn_model_name, model_config=model_config
+        model_config.cnn_model_name,
+        model_config=model_config,
     )
 
     with tf.variable_scope("model"):

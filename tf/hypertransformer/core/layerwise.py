@@ -338,7 +338,13 @@ class SeparateGenerator(Generator):
 class BaseCNNLayer(tf.Module):
     """Base CNN layer used in our models."""
 
-    def __init__(self, name: str, model_config: LayerwiseModelConfig, head_builder=None, var_reg_weight=None):
+    def __init__(
+        self,
+        name: str,
+        model_config: LayerwiseModelConfig,
+        head_builder=None,
+        var_reg_weight=None,
+    ):
         super().__init__(name=name)
 
         self.model_config = model_config
@@ -442,6 +448,7 @@ class LayerwiseModel(common_ht.Model):
 
     def __init__(self, layers: list[Any], model_config: LayerwiseModelConfig):
         super().__init__()
+
         self.layers = layers
         self.shared_feature_extractor = feature_extractors.get_shared_feature_extractor(
             model_config
@@ -453,7 +460,7 @@ class LayerwiseModel(common_ht.Model):
         self.model_config = model_config
 
     def train(
-        self,  # pytype: disable=signature-mismatch  # overriding-return-type-checks
+        self,
         inputs,
         labels,
         mask=None,
@@ -758,10 +765,13 @@ class LogitsLayer(BaseCNNLayer):
             # We generally do not want to regularize the last logits layer.
             var_reg_weight=0.0,
         )
+
         self.dropout = tf.layers.Dropout(rate=model_config.cnn_dropout_rate)
+
         if num_features is None:
             num_features = model_config.num_features
         self.num_features = num_features
+
         self.fe_kernel_size = fe_kernel_size
         self.input_dim = -1
         self.initialized = False
@@ -769,6 +779,7 @@ class LogitsLayer(BaseCNNLayer):
     def setup(self, inputs):
         """Input-specific setup."""
         self.input_dim = int(inputs.shape[-1])
+
         if self.num_features is None:
             self.num_features = self.input_dim
         feature_extractor_class = functools.partial(
@@ -779,6 +790,7 @@ class LogitsLayer(BaseCNNLayer):
             nonlinear_feature=self.model_config.nonlinear_feature,
             kernel_size=self.fe_kernel_size,
         )
+
         self.generator.set_weight_params(
             num_weight_blocks=self.model_config.num_labels,
             weight_block_size=self.input_dim + 1,
@@ -787,6 +799,10 @@ class LogitsLayer(BaseCNNLayer):
 
     def __call__(self, tensor, training=True):
         self.fc = tf.layers.Dense(units=self.model_config.num_labels, name="fc")
+        # Global Average Pooling
+        # [batch, height, width, channels]
+        #       ↓
+        # [batch, channels]
         tensor = tf.reduce_mean(tensor, axis=[1, 2])
         dropout_tensor = self.dropout(tensor, training=training)
         return self.fc(dropout_tensor)
@@ -807,6 +823,7 @@ class LogitsLayer(BaseCNNLayer):
             ws = [w[n] for w in weights]
             output = tf.stack(ws, axis=-1)
             return output
+
         return None
 
 
@@ -816,7 +833,9 @@ class FlattenLogitsLayer(LogitsLayer):
     def setup(self, inputs):
         """Input-specific setup."""
         self.input_dim = int(inputs.shape[-1])
+
         width, height = int(inputs.shape[1]), int(inputs.shape[2])
+
         if self.num_features is None:
             self.num_features = self.input_dim
         if self.model_config.logits_feature_extractor in ["", "default", "mix"]:
@@ -832,11 +851,13 @@ class FlattenLogitsLayer(LogitsLayer):
             feature_extractor_class = feature_extractors.PassthroughFeatureExtractor
         else:
             raise AssertionError("Unexpected `logits_feature_extractor` value.")
+
         if self.model_config.logits_feature_extractor == "mix":
             feature_extractor_class = functools.partial(
                 feature_extractors.PassthroughFeatureExtractor,
                 wrap_class=feature_extractor_class,
             )
+
         self.generator.set_weight_params(
             num_weight_blocks=self.model_config.num_labels,
             weight_block_size=self.input_dim * width * height + 1,
@@ -845,6 +866,7 @@ class FlattenLogitsLayer(LogitsLayer):
 
     def __call__(self, tensor, training=True):
         flatten = tf.layers.Flatten()
+
         self.fc = tf.layers.Dense(units=self.model_config.num_labels, name="fc")
         dropout_tensor = self.dropout(flatten(tensor), training=training)
         return self.fc(dropout_tensor)

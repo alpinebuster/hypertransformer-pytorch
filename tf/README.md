@@ -45,7 +45,7 @@ They can be executed as follows:
 tensorboard --logdir=../omniglot/logs
 ```
 
-The evaluation script `evaluate_model.py` can be executed in parallel to
+The evaluation script `evaluate.py` can be executed in parallel to
 evaluate produced checkpoints while the model is being trained.
 The evaluation script accepts the same parameters as the training script.
 

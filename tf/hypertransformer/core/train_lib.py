@@ -70,7 +70,7 @@ def _load_cache(data_config: DatasetConfig) -> Optional[Dict[int, np.ndarray]]:
             data = np.load(dev)
         if len(data.shape) < 4:
             data = np.expand_dims(data, axis=-1)
-        # Converting a 4D tensor [Label, Batch, W, H, C] to a dictionary by label.
+        # Converting a 4D tensor [all_classes, all_samples, W, H, C] to a dictionary by label.
         if data.dtype == bool:
             return {k: _convert_bool(data[k]) for k in range(data.shape[0])}
         else:
@@ -99,8 +99,8 @@ def _load_cache(data_config: DatasetConfig) -> Optional[Dict[int, np.ndarray]]:
 def _make_numpy_array(data_config: DatasetConfig, batch_size: int, sess=None) -> Dict[int, np.ndarray]:
     """Makes a NumPy array for given dataset configuration."""
     # Dict[int, np.ndarray]:
-    #   int -> Label
-    #   np.ndarray -> [Batch, W, H, C]
+    #   int -> all_classes
+    #   np.ndarray -> [all_samples, W, H, C]
     output = None
     if sess is None:
         sess = tf.Session()
@@ -108,7 +108,7 @@ def _make_numpy_array(data_config: DatasetConfig, batch_size: int, sess=None) ->
     if ds is None:
         output = _load_cache(data_config)
         if output is None:
-            ds = tfds.load(data_config.dataset_name, data_dir=data_config.data_dir)[   # type: ignore
+            ds = tfds.load(data_config.dataset_name, data_dir=data_config.data_dir)[ # type: ignore
                 data_config.ds_split
             ]
 
@@ -174,8 +174,7 @@ def _make_dataset_helper_unbalanced(
             images = _resize(images, image_size)
         images = images / 128.0 - 1.0
 
-    # Stopping gradients to avoid backpropagation through random shuffling
-    # operation.
+    # Stopping gradients to avoid backpropagation through random shuffling operation.
     images = tf.stop_gradient(images)
     labels = tf.stop_gradient(labels)
     classes = tf.stop_gradient(classes)
@@ -213,10 +212,10 @@ def _make_dataset_helper_balanced(
         for images, labels, classes in images_labels:
             if image_size is not None:
                 images = _resize(images, image_size)
+            # [0, 255] → [0, 1.992] → [-1.0, 0.992]
             images = images / 128.0 - 1.0
-            # Stopping gradients to avoid backpropagation through random shuffling
-            # operation.
             labels.set_shape((images.shape[0],))
+            # Stopping gradients to avoid backpropagation through random shuffling operation.
             output.append(
                 (
                     tf.stop_gradient(images),
@@ -234,7 +233,11 @@ def _get_class_bounds(data_config: DatasetConfig):
     return min(data_config.use_label_subset), max(data_config.use_label_subset)
 
 
-def make_dataset_unbalanced(model_config: LayerwiseModelConfig, data_config: DatasetConfig, shuffle_labels=True):
+def make_dataset_unbalanced(
+    model_config: LayerwiseModelConfig,
+    data_config: DatasetConfig,
+    shuffle_labels=True,
+):
     """Creates data for Transformer and CNN.
 
     Arguments:
@@ -346,6 +349,7 @@ def make_dataset(
     )
 
     if data_config.balanced_batches:
+        # The two batches are "generated separately".
         dataset_maker = make_dataset_balanced
     else:
         dataset_maker = make_dataset_unbalanced

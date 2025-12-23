@@ -91,10 +91,12 @@ class PWFeedForward(tf.Module):
 class MultiHeadAttention(tf.Module):
     """Multi-head attention layer."""
 
-    def __init__(self, params, name=None):
-        super(MultiHeadAttention, self).__init__(name=name)
+    def __init__(self, params: TransformerParams, name=None):
+        super().__init__(name=name)
+
         self.num_heads = params.heads
         self.qk_depth = params.query_key_dim // params.heads
+        assert params.value_dim
         self.v_depth = params.value_dim // params.heads
         self.v_dim = params.value_dim
 

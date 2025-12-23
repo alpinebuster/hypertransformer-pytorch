@@ -30,7 +30,9 @@ def avgpool_model(model_config: LayerwiseModelConfig, num_layers=1):
     """Creates a basic 'layerwise' model."""
     layers = [
         ConvLayer(
-            name=f"layer_{i + 1}", model_config=model_config, head_builder=LogitsLayer
+            name=f"layer_{i + 1}",
+            model_config=model_config,
+            head_builder=LogitsLayer,
         )
         for i in range(num_layers - 1)
     ]
