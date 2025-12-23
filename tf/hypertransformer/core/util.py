@@ -17,8 +17,9 @@ TransformerParamsFn = Callable[[int], transformer.TransformerParams]
 
 def var_getter_wrapper(getter, name: str, *args, **kwargs):
     """Convenient wrapper around CNN variable getters."""
-    weights = kwargs.pop("_weights")
     shape = kwargs.get("shape")
+
+    weights = kwargs.pop("_weights")
     cnn_var_getter = kwargs.pop("_cnn_var_getter")
     getter_dict = kwargs.pop("_getter_dict")
     add_trainable_weights = kwargs.pop("_add_trainable_weights", False)

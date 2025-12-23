@@ -77,7 +77,8 @@ class PWFeedForward(tf.Module):
     """Pointwise feedforward layer."""
 
     def __init__(self, dim, internal_dim, name=None, activation=tf.nn.relu):
-        super(PWFeedForward, self).__init__(name=name)
+        super().__init__(name=name)
+
         self.layer_1 = tf.layers.Dense(
             internal_dim, activation=activation, name="layer_1"
         )
@@ -132,7 +133,8 @@ class EncoderLayer(tf.Module):
     """Encoder layer."""
 
     def __init__(self, params, name=None, **kwargs):
-        super(EncoderLayer, self).__init__(name=name)
+        super().__init__(name=name)
+
         self.mha = MultiHeadAttention(params, name="attention")
         self.ffn = None
         if params.internal_dim > 0:
@@ -166,7 +168,7 @@ class DecoderLayer(tf.Module):
     """Decoder layer."""
 
     def __init__(self, params, name=None):
-        super(DecoderLayer, self).__init__(name=name)
+        super().__init__(name=name)
 
         self.mha_1 = MultiHeadAttention(params, name="attention_1")
         self.mha_2 = MultiHeadAttention(params, name="attention_2")
@@ -211,7 +213,8 @@ class Encoder(tf.Module):
     def __init__(
         self, params, layer_dropout_prob=0.0, skip_last_nonlinearity=False, name=None
     ):
-        super(Encoder, self).__init__(name=name)
+        super().__init__(name=name)
+
         self.num_layers = params.num_layers
         self.enc_layers = [
             EncoderLayer(params, name=f"layer_{i+1}")
@@ -239,7 +242,8 @@ class Decoder(tf.Module):
     """Transformer decoder."""
 
     def __init__(self, params, skip_last_nonlinearity=False, name=None):
-        super(Decoder, self).__init__(name=name)
+        super().__init__(name=name)
+
         self.num_layers = params.num_layers
         self.dec_layers = [
             DecoderLayer(params, name=f"layer_{i+1}")
@@ -266,7 +270,8 @@ class EncoderDecoderModel(tf.Module):
     """Transformer model."""
 
     def __init__(self, params, skip_last_nonlinearity=False, name=None):
-        super(EncoderDecoderModel, self).__init__(name=name)
+        super().__init__(name=name)
+
         self.encoder = Encoder(params, name="encoder")
         self.decoder = Decoder(
             params, name="decoder", skip_last_nonlinearity=skip_last_nonlinearity
@@ -294,7 +299,8 @@ class EncoderModel(tf.Module):
     """Transformer model."""
 
     def __init__(self, params, skip_last_nonlinearity=False, name=None):
-        super(EncoderModel, self).__init__(name=name)
+        super().__init__(name=name)
+
         self.encoder = Encoder(
             params, name="encoder", skip_last_nonlinearity=skip_last_nonlinearity
         )
@@ -316,7 +322,8 @@ class SeparateEncoderDecoderModel(tf.Module):
     def __init__(
         self, encoder_params, decoder_params, skip_last_nonlinearity=False, name=None
     ):
-        super(SeparateEncoderDecoderModel, self).__init__(name=name)
+        super().__init__(name=name)
+
         self.encoder = Encoder(encoder_params, name="encoder")
         self.decoder = Decoder(
             decoder_params,

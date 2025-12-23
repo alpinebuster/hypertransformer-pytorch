@@ -446,7 +446,7 @@ class BaseCNNLayer(tf.Module):
 class LayerwiseModel(common_ht.Model):
     """Model specification including layer builders."""
 
-    def __init__(self, layers: list[Any], model_config: LayerwiseModelConfig):
+    def __init__(self, layers: list[BaseCNNLayer], model_config: LayerwiseModelConfig):
         super().__init__()
 
         self.layers = layers
@@ -715,8 +715,24 @@ class ConvLayer(BaseCNNLayer):
     def var_getter(self, offsets, weights, shape, name):
         if name.endswith("/kernel"):
             if self.generate_weights:
+                """Take the kernel part from each w
+                w = [
+                    conv_kernel_flat...,   # conv_weight_size
+                    bias,                  # 1
+                    gamma,                 # 1 BN
+                    beta                   # 1 BN
+                ]
+                    |
+                    v
+                ws = [
+                    [k1_0, k1_1, ..., k1_N],
+                    [k2_0, k2_1, ..., k2_N],
+                    ...
+                ]
+                """
                 ws = [w[: self.conv_weight_size] for w in weights]
                 kernel = tf.stack(ws, axis=self.stack_axis)
+                # [k_H, k_W, C_in, C_out]
                 kernel = tf.reshape(
                     kernel,
                     (
