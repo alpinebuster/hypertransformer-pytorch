@@ -107,7 +107,52 @@ class ModelConfig:
 
 
 class WeightAllocation(enum.Enum):
-    """Type of the weight allocation by the Transformer."""
+    """Type of the weight allocation by the Transformer.
+        e.g. For a kernel with size: [k_H, k_W, C_in, C_out] -> [3, 3, 2, 4]
+
+        1. spatial
+          a) The Transformer outputs 9 embeddings (because of k_H*k_W -> 3*3):
+            E(0, 0), E(0, 1), ..., E(2, 2)
+          b) The length of each embedding is:
+            C_in * C_out = 2 * 4 = 8
+          c) Each embedding corresponds to:
+            E(i,j) → kernel[i, j, :, :]
+                |
+                V
+            kernel[0, 0, :, :] ← E(0, 0)
+            kernel[0, 1, :, :] ← E(0, 1)
+                ...
+            kernel[2, 2, :, :] ← E(2, 2)
+                |
+                V
+            ┌─────┬─────┬─────┐
+            │ E00 │ E01 │ E02 │
+            ├─────┼─────┼─────┤
+            │ E10 │ E11 │ E12 │
+            ├─────┼─────┼─────┤
+            │ E20 │ E21 │ E22 │
+            └─────┴─────┴─────┘
+
+        2. output
+          a) The Transformer outputs 4 embeddings (because C_out = 4)
+            E_0, E_1, E_2, E_3
+          b) The length of each embedding is:
+            length = k_H * k_W * C_in = 3 * 3 * 2 = 18
+          c) Each embedding corresponds to:
+            E_out → kernel[:, :, :, C_out]
+                |
+                V
+            kernel[:, :, :, 0] ← E_0
+            kernel[:, :, :, 1] ← E_1
+            kernel[:, :, :, 2] ← E_2
+            kernel[:, :, :, 3] ← E_3
+                |
+                V
+            Filter 0 ← E_0
+            Filter 1 ← E_1
+            Filter 2 ← E_2
+            Filter 3 ← E_3
+    """
 
     SPATIAL = 1
     OUTPUT_CHANNEL = 2

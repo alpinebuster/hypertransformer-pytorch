@@ -120,7 +120,6 @@ flags.DEFINE_string("train_dataset", "emnist", "Training dataset specification."
 # Currently, both approaches seem to produce very similar results, but
 # 'output' weight allocation is more suitable for generating BN parameters
 # (currently supported only with this weight allocation scheme).
-
 flags.DEFINE_enum(
     "lw_weight_allocation",
     "spatial",

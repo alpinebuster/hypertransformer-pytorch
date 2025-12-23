@@ -4,7 +4,7 @@ import dataclasses
 import functools
 import math
 
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional
 
 import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 
@@ -104,6 +104,9 @@ class Generator:
         self.transformer_io = None
         self.transformer = None
 
+    def _setup(self):
+        raise NotImplementedError
+
     def set_weight_params(self, num_weight_blocks, weight_block_size):
         self.num_weight_blocks = num_weight_blocks
         self.weight_block_size = weight_block_size
@@ -191,7 +194,7 @@ class JointGenerator(Generator):
             activation_fn=util.nonlinearity(self.model_config.transformer_nonlinearity),
         )
 
-    def setup(self):
+    def _setup(self):
         with tf.variable_scope(self.name + "_setup"):
             self._make_feature_extractor()
             self.transformer_io = util.JointTransformerIO(
@@ -211,7 +214,7 @@ class JointGenerator(Generator):
     ):
         """Generates weights from the inputs."""
         if self.transformer_io is None:
-            self.setup()
+            self._setup()
 
         with tf.variable_scope(f"builder_{self.name}"):
             features = self._features(
@@ -286,7 +289,7 @@ class SeparateGenerator(Generator):
             activation_fn=util.nonlinearity(self.model_config.transformer_nonlinearity),
         )
 
-    def setup(self):
+    def _setup(self):
         with tf.variable_scope(self.name + "_setup"):
             self._make_feature_extractor()
             self.transformer_io = util.SeparateTransformerIO(
@@ -300,7 +303,7 @@ class SeparateGenerator(Generator):
         """Generates weights from the inputs."""
         del mask
         if self.transformer_io is None:
-            self.setup()
+            self._setup()
         if self.model_config.max_prob_remove_unlabeled > 0:
             raise ValueError(
                 "Removing unlabeled samples is not currently supported "
@@ -374,14 +377,14 @@ class BaseCNNLayer(tf.Module):
         self.getter_dict = {}
         self.initialized = False
 
-    def var_getter(self, offsets, weights, shape, name):
+    def _setup(self, inputs):
+        """Input-dependent layer setup."""
         raise NotImplementedError
 
     def __call__(self, inputs, training=True):
         raise NotImplementedError
 
-    def setup(self, inputs):
-        """Input-dependent layer setup."""
+    def var_getter(self, offsets, weights, shape, name):
         raise NotImplementedError
 
     def create(
@@ -395,7 +398,7 @@ class BaseCNNLayer(tf.Module):
     ):
         """Creates a layer using a feature extractor and a Transformer."""
         if not self.initialized:
-            self.setup(input_tensor)
+            self._setup(input_tensor)
             self.generate_weights = generate_weights
             self.initialized = True
 
@@ -446,7 +449,7 @@ class BaseCNNLayer(tf.Module):
 class LayerwiseModel(common_ht.Model):
     """Model specification including layer builders."""
 
-    def __init__(self, layers: list[BaseCNNLayer], model_config: LayerwiseModelConfig):
+    def __init__(self, layers: "list[ConvLayer | BaseCNNLayer]", model_config: LayerwiseModelConfig):
         super().__init__()
 
         self.layers = layers
@@ -583,36 +586,6 @@ class LayerwiseModel(common_ht.Model):
 class ConvLayer(BaseCNNLayer):
     """Conv Layer of the CNN."""
 
-    def compute_weight_sizes(self, weight_alloc):
-        """Computes the number of weight blocks, their size, axis to stack, etc."""
-        assert self.input_dim > 0
-        if weight_alloc == common_ht.WeightAllocation.SPATIAL:
-            if self.generate_bn:
-                raise ValueError(
-                    "BN weight generation is not currently supported for "
-                    "the spatial weight allocation."
-                )
-            if self.generate_bias:
-                raise ValueError(
-                    "Bias generation is not currently supported for "
-                    "the spatial weight allocation."
-                )
-            self.num_blocks = int(self.kernel_size**2)
-            self.block_size = self.input_dim * self.output_dim
-            self.conv_weight_size = self.block_size
-            self.stack_axis = 0
-        elif weight_alloc == common_ht.WeightAllocation.OUTPUT_CHANNEL:
-            self.num_blocks = self.output_dim
-            self.block_size = self.input_dim * int(self.kernel_size**2)
-            self.conv_weight_size = self.block_size
-            if self.generate_bias:
-                self.block_size += 1
-            if self.generate_bn:
-                self.block_size += 2
-            self.stack_axis = -1
-        else:
-            raise ValueError("Unknown WeightAllocation value.")
-
     def __init__(
         self,
         name,
@@ -650,28 +623,65 @@ class ConvLayer(BaseCNNLayer):
             output_dim = model_config.default_num_channels
         if stride is None:
             stride = model_config.stride
+
         self.generate_bn = generate_bn
         self.generate_bias = generate_bias
         self.act_fn = act_fn
         self.kernel_size = kernel_size
         self.num_features = num_features
+
         self.feature_layers = feature_layers
+        if self.feature_layers < 1:
+            self.feature_layers = self.model_config.feature_layers
+
         self.padding = padding
         self.input_dim = -1
         self.output_dim = output_dim
-        if self.feature_layers < 1:
-            self.feature_layers = self.model_config.feature_layers
         self.stride = stride
         self.maxpool_size = maxpool_size
         self.initialized = False
         self.act_after_bn = act_after_bn
 
-    def setup(self, inputs):
+    def _compute_weight_sizes(self, weight_alloc):
+        """Computes the number of weight blocks, their size, axis to stack, etc."""
+        assert self.input_dim > 0
+        if weight_alloc == common_ht.WeightAllocation.SPATIAL:
+            if self.generate_bn:
+                raise ValueError(
+                    "BN weight generation is not currently supported for "
+                    "the spatial weight allocation."
+                )
+            if self.generate_bias:
+                raise ValueError(
+                    "Bias generation is not currently supported for "
+                    "the spatial weight allocation."
+                )
+
+            self.num_blocks = int(self.kernel_size**2)
+            self.block_size = self.input_dim * self.output_dim
+            self.conv_weight_size = self.block_size
+
+            self.stack_axis = 0
+        elif weight_alloc == common_ht.WeightAllocation.OUTPUT_CHANNEL:
+            self.num_blocks = self.output_dim
+            self.block_size = self.input_dim * int(self.kernel_size**2)
+            self.conv_weight_size = self.block_size
+
+            if self.generate_bias:
+                self.block_size += 1
+            if self.generate_bn:
+                self.block_size += 2
+
+            self.stack_axis = -1
+        else:
+            raise ValueError("Unknown WeightAllocation value.")
+
+    def _setup(self, inputs):
         """Input-specific setup."""
         self.input_dim = int(inputs.shape[-1])
         if self.num_features is None:
             self.num_features = max(self.output_dim, self.input_dim)
-        self.compute_weight_sizes(self.model_config.weight_allocation)
+        self._compute_weight_sizes(self.model_config.weight_allocation)
         feature_extractor_class = functools.partial(
             feature_extractors.SimpleConvFeatureExtractor,
             input_size=int(inputs.shape[1]),
@@ -723,7 +733,7 @@ class ConvLayer(BaseCNNLayer):
                     beta                   # 1 BN
                 ]
                     |
-                    v
+                    V
                 ws = [
                     [k1_0, k1_1, ..., k1_N],
                     [k2_0, k2_1, ..., k2_N],
@@ -792,7 +802,7 @@ class LogitsLayer(BaseCNNLayer):
         self.input_dim = -1
         self.initialized = False
 
-    def setup(self, inputs):
+    def _setup(self, inputs):
         """Input-specific setup."""
         self.input_dim = int(inputs.shape[-1])
 
@@ -846,7 +856,7 @@ class LogitsLayer(BaseCNNLayer):
 class FlattenLogitsLayer(LogitsLayer):
     """Logits layer of the CNN that flattens its input (instead of averaging)."""
 
-    def setup(self, inputs):
+    def _setup(self, inputs):
         """Input-specific setup."""
         self.input_dim = int(inputs.shape[-1])
 
