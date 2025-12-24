@@ -40,10 +40,11 @@ class SimpleConvFeatureExtractor(FeatureExtractor):
     ):
         super().__init__(name=name)
 
+        self.feature_dim = feature_dim
         self.nonlinear_feature = nonlinear_feature
         self.convs = []
-        def_stride = 2
         self.kernel_size = kernel_size
+        def_stride = 2
 
         assert input_size
         if input_size < kernel_size:
@@ -112,7 +113,7 @@ class SharedMultilayerFeatureExtractor(FeatureExtractor):
     def __init__(
         self,
         feature_layers: int,
-        feature_dim: int,
+        feature_dim: int, # Number of Conv2D filters
         name: str,
         kernel_size: int = 3,
         padding: str = "valid",
@@ -130,6 +131,7 @@ class SharedMultilayerFeatureExtractor(FeatureExtractor):
             # The first `feature_layers - 1` convolutional layers use a stride of 2 to progressively reduce the spatial dimensions, 
             # while the final layer uses a stride of `1` to extract features without additional downsampling.
             stride = 2 if idx < feature_layers - 1 else 1
+            # BatchNorm relies on "channel consistency across samples", and LayerNorm depends on "overall stability of a single sample".
             self.bns.append(tf.layers.BatchNormalization() if use_bn else None)
             self.convs.append(
                 tf.layers.Conv2D(

@@ -18,17 +18,51 @@ class TransformerParams:
     """Transformer model parameters.
 
     Attributes:
-       query_key_dim: the dimension of the query/key
+       query_key_dim (D_qk): the dimension of the query/key
+       value_dim (D_v): the dimension of the value embedding (defaults to query_key_dim)
        internal_dim: dimension of the embedding in pointwise layer
        num_layers: number of transformer layers
-       value_dim: the dimension of the value embedding (defaults to query_key_dim)
-       mha_output_dim: the dimension of the final output of pointwise layer (Multi-Head Attention)
-       heads: number of heads in multi-head attention value_dim and query_key_dim
+       mha_output_dim (D_mha_out): the dimension of the final output of pointwise layer (Multi-Head Attention)
+       heads (H): number of heads in multi-head attention value_dim and query_key_dim
          need to be divisible by
        dropout_rate: dropout applied to the output of each transformer block
        activation_fn: activation to use in feed forward blocks.
        attention_activation_fn: activation function to use in the attention
          module (default is softmax).
+       
+       e.g. Multi-Head Attention (MHA)
+       1. Input (T_q/T_k/T_v: The sequence length of query/key/value, and in self-attention: `T_q = T_k = T_v = T`)
+        X_q ∈ ℝ[B, T_q, D_qk]
+        X_k ∈ ℝ[B, T_k, D_qk]
+        X_v ∈ ℝ[B, T_v, D_v]
+            ↓
+       2. Linear projection
+        Q = X_q · W_Q → [B, T_q, D_qk], W_Q ∈ ℝ[D_q · D_qk]
+        K = X_k · W_K → [B, T_k, D_qk], W_K ∈ ℝ[D_k · D_qk]
+        V = X_v · W_V → [B, T_v, D_v],  W_V ∈ ℝ[D_v · D_v]
+            ↓
+       3. Split heads
+        Q = [B, T_q, H*d_qk] → reshape → [B, T_q, H, d_qk] → transpose → [B, H, T_q, d_qk]
+        K = [B, T_q, H*d_qk] → reshape → [B, T_k, H, d_qk] → transpose → [B, H, T_k, d_qk]
+        V = [B, T_v, H*d_v]  → reshape → [B, T_v, H, d_v]  → transpose → [B, H, T_v, d_v]
+            ↓
+       4. Attention scores (QK^T)
+        scores = [B, H, T_q, d_qk] · [B, H, d_qk, T_k] → [B, H, T_q, T_k] → scores /= √d_qk
+            ↓
+       5. Attention Activation (Softmax) 
+        α = Softmax(scores, axis=T_k) → [B, H, T_q, T_k]
+            ↓
+       6. Weighted sum (·V)
+        context = α · V → [B, H, T_q, T_k] × [B, H, T_k, d_v] → [B, H, T_q, d_v]
+            ↓
+       7. Transpose
+        context = [B, H, T_q, d_v] → [B, T_q, H, d_v]
+            ↓
+       8. Concat multiple heads
+        [B, T_q, H, d_v] → reshape → [B, T_q, H*d_v] = [B, T_q, D_v]
+            ↓
+       9. Output projection
+        [B, T_q, D_v] → [B, T_q, D_mha_out]
     """
 
     query_key_dim: int
