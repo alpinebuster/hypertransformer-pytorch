@@ -164,8 +164,9 @@ class PassthroughFeatureExtractor(FeatureExtractor):
         concat -> (size: [B, HWC + D])
     """
 
-    def __init__(self, name, input_size=None, wrap_class=None):
+    def __init__(self, name: str, wrap_class=None):
         super().__init__(name=name)
+
         self.name = name
         if wrap_class is not None:
             self.wrap_feature_extractor = wrap_class(name=name)
