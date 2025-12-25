@@ -162,6 +162,34 @@ class JointGenerator(Generator):
             return features, embedding_size
         else:
             pad_size = embedding_size - input_embedding_size
+            """
+            Paddings specification for `tf.pad`:
+               [
+                   [0, 0],       # Dimension 0 (batch dimension):
+                                 #   - pad_before = 0
+                                 #   - pad_after  = 0
+                                 #   → no padding is applied to the batch dimension
+
+                   [0, pad_size] # Dimension 1 (feature dimension):
+                                 #   - pad_before = 0
+                                 #   - pad_after  = pad_size
+                                 #   → append `pad_size` zeros to the right (end) of the feature vector
+               ]
+
+            Example:
+               features = [[1, 2, 3],
+                           [4, 5, 6]]
+                                ↓
+               paddings = [[1, 1],  # pad 1 sample before and after the batch
+                           [0, 2]]  # pad 2 zeros at the end of the feature dimension
+                                ↓
+               tf.pad(features, paddings, mode="CONSTANT")
+                                ↓
+               [[0, 0, 0, 0, 0],   # padded batch (before)
+                [1, 2, 3, 0, 0],   # original sample 0
+                [4, 5, 6, 0, 0],   # original sample 1
+                [0, 0, 0, 0, 0]]   # padded batch (after)
+            """
             paddings = tf.constant([[0, 0], [0, pad_size]])
             return tf.pad(features, paddings, "CONSTANT"), embedding_size
 
@@ -183,9 +211,9 @@ class JointGenerator(Generator):
         attn_act_fn = common_ht.get_transformer_activation(self.model_config)
 
         return transformer.TransformerParams(
-            query_key_dim=get_size(self.model_config.query_key_dim_frac),
-            internal_dim=get_size(self.model_config.internal_dim_frac),
-            value_dim=get_size(self.model_config.value_dim_frac),
+            query_key_dim=get_size(self.model_config.query_key_dim_frac), # D_qk
+            internal_dim=get_size(self.model_config.internal_dim_frac), # Used by `PWFeedForward`
+            value_dim=get_size(self.model_config.value_dim_frac), # D_v
             num_layers=self.model_config.num_layers,
             mha_output_dim=embedding_size,
             heads=num_heads,
@@ -246,9 +274,8 @@ class JointGenerator(Generator):
 class SeparateGenerator(Generator):
     """Model that feeds samples to Encoder and weights to Decoder."""
 
-    def get_encoder_params(self, embedding_size):
+    def get_encoder_params(self, embedding_size: int):
         """Returns Transformer parameters."""
-
         def get_size(frac):
             if frac <= 3.0:
                 return int(embedding_size * frac)
@@ -269,9 +296,8 @@ class SeparateGenerator(Generator):
             activation_fn=util.nonlinearity(self.model_config.transformer_nonlinearity),
         )
 
-    def get_decoder_params(self, embedding_size):
+    def get_decoder_params(self, embedding_size: int):
         """Returns Transformer parameters."""
-
         def get_size(frac):
             if frac <= 3.0:
                 return int(embedding_size * frac)
@@ -321,9 +347,10 @@ class SeparateGenerator(Generator):
 
         with tf.variable_scope(f"builder_{self.name}"):
             features = self._features(input_tensor, shared_features, enable_fe_dropout)
-            weight_dim = self.transformer_io.embedding_dim + self.weight_block_size
+            weight_dim = self.transformer_io.weight_embedding_dim + self.weight_block_size
             sample_dim = self.transformer_io.embedding_dim
             sample_dim += int(features.shape[1])
+
             with tf.variable_scope("transformer"):
                 if self.transformer is None:
                     self.transformer = transformer.SeparateEncoderDecoderModel(

@@ -99,8 +99,11 @@ class TransformerIO(tf.Module):
 
     Notation (vector-level representation):
 
-       weight token = [ weight_emb | zeros ]
-                       ←--- D ---→  ←- I -→
+       weight token = [ weight_emb |   zeros    ]
+                       ←-- D_w --→  ←-- I_w --→
+
+       label token  = [ label_emb  | images_emb ]
+                       ←-- D_l --→  ←-- I_l --→
 
        a) W_i = [ w1 , w2 , ... ]
            Weight embedding for the i-th weight block.
@@ -114,9 +117,9 @@ class TransformerIO(tf.Module):
         self,
         num_labels: int,
         num_weights: int,
-        weight_block_size: int,
-        embedding_dim=8,
-        weight_embedding_dim=None,
+        weight_block_size: int, # I_w
+        embedding_dim=8, # D_w
+        weight_embedding_dim=None, # D_l
     ):
         self.num_labels = num_labels
         self.num_weights = num_weights
@@ -182,8 +185,15 @@ class SimpleTransformerIO(TransformerIO):
         """Generates Transformer inputs from input samples."""
         with tf.name_scope(None, default_name="sample_encoder"):
             batch_size = images.shape[0]
+            #                                        I_l
             images = tf.reshape(images, [batch_size, -1])
             encoded_labels = self._encode_labels(labels)
+            """
+            encoded_labels: [batch_size, label_dim]
+            images:         [batch_size, image_dim]
+                             ↓
+            [batch_size, label_dim + image_dim]
+            """
             return tf.concat([encoded_labels, images], axis=-1)
 
     def extend_label_mask(self, label_mask):
@@ -251,6 +261,7 @@ class JointTransformerIO(TransformerIO):
         """Generates Transformer inputs from input samples."""
         with tf.name_scope(None, default_name="sample_encoder"):
             batch_size = images.shape[0]
+            #                                        I_l
             images = tf.reshape(images, [batch_size, -1])
             encoded_labels = self._encode_labels(labels)
             sequence = tf.concat([encoded_labels, images], axis=-1)
@@ -266,6 +277,15 @@ class JointTransformerIO(TransformerIO):
         return sequence
 
     def extend_label_mask(self, label_mask):
+        """
+        v---  num_weights  ---v\n
+        [0, 0, 0, ..., 0, 0, 0]
+                   ↓
+        label_mask = [m0, m1, m2, ..., mk]
+                   ↓
+        [0, 0, 0, ..., 0, 0, 0, m0, m1, m2, ..., mk]\n
+         ^--- num_weights ---^
+        """
         weight_mask = tf.zeros((self.num_weights,), dtype=tf.float32)
         return tf.concat([weight_mask, label_mask], axis=-1)
 
