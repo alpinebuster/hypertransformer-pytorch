@@ -76,13 +76,45 @@ def var_getter_wrapper(getter, name: str, *args, **kwargs):
 
 
 class TransformerIO(tf.Module):
-    """Encoder and decoder interfacing with the Transformer."""
+    """Encoder and decoder interfacing with the Transformer.
+
+    1. SimpleTransformerIO
+       W is query, which is read outside the Transformer
+
+        [ L   | I... ]  --> Transformer               --> [K | V] (memory)
+        [ W_i | 0..0 ]  --> Attention, dot(W,K^T) × V --> decoded_weight
+
+    2. SeparateTransformerIO
+       W is a token, but it is not in the same sequence as L/I
+
+        [ W_i | 0..0 ]  --> Transformer --> [ W_i | decoded_weight_i ]
+        [ L   | I... ]  --> Transformer --> [ sample_output ]
+
+    3. JointTransformerIO
+       Both W and L/I are tokens and can pay attention to each other
+
+        [[ W_i | 0..0 ]     [ W_i | decoded_weight_i ]
+             ...        -->            ...
+         [ L   | I... ]]    [ sample_output          ]
+
+    Notation (vector-level representation):
+
+       weight token = [ weight_emb | zeros ]
+                       ←--- D ---→  ←- I -→
+
+       a) W_i = [ w1 , w2 , ... ]
+           Weight embedding for the i-th weight block.
+           This vector represents the identity or query of a learnable weight.
+
+       b) L   = [ l1 , l2 , ... ]
+           Label embedding. A continuous vector representation of a discrete class label.
+    """
 
     def __init__(
         self,
         num_labels: int,
-        num_weights,
-        weight_block_size,
+        num_weights: int,
+        weight_block_size: int,
         embedding_dim=8,
         weight_embedding_dim=None,
     ):
@@ -95,8 +127,9 @@ class TransformerIO(tf.Module):
         self.weight_block_size = weight_block_size
         self.label_embs = []
         self.weight_embs = []
+
         with tf.variable_scope(None, default_name="label_embeddings"):
-            # 1 additional class is reserved for "no label" class
+            # One additional class is reserved for "no label" class
             for label_idx in range(self.num_labels + 1):
                 self.label_embs.append(
                     tf.get_variable(
@@ -107,6 +140,7 @@ class TransformerIO(tf.Module):
                     )
                 )
         self.label_embs = tf.stack(self.label_embs, axis=0)
+
         with tf.variable_scope(None, default_name="weight_embeddings"):
             for weight_idx in range(num_weights):
                 self.weight_embs.append(
@@ -118,9 +152,27 @@ class TransformerIO(tf.Module):
                     )
                 )
 
-    def encode_labels(self, labels):
-        """Generates label encodings."""
+    def _encode_labels(self, labels):
+        """Generates label encodings.
+
+        e.g. `tf.gather`
+           label_embs = [
+               [1.0, 0.0],   # 0
+               [0.0, 1.0],   # 1
+               [1.0, 1.0],   # 2
+           ]
+   
+           labels = [2, 0]
+   
+           tf.gather(label_embs, labels, axis=0) == [
+               [1.0, 1.0],   # index 2
+               [1.0, 0.0],   # index 0
+           ]
+        """
         return tf.gather(self.label_embs, labels, axis=0)
+
+    def decode_weights(self, embeddings):
+        raise NotImplementedError
 
 
 class SimpleTransformerIO(TransformerIO):
@@ -131,7 +183,7 @@ class SimpleTransformerIO(TransformerIO):
         with tf.name_scope(None, default_name="sample_encoder"):
             batch_size = images.shape[0]
             images = tf.reshape(images, [batch_size, -1])
-            encoded_labels = self.encode_labels(labels)
+            encoded_labels = self._encode_labels(labels)
             return tf.concat([encoded_labels, images], axis=-1)
 
     def extend_label_mask(self, label_mask):
@@ -142,8 +194,24 @@ class SimpleTransformerIO(TransformerIO):
         with tf.name_scope(None, default_name="weight_decoder"):
             weights = []
             for weight_emb in self.weight_embs:
-                weight_keys = embeddings[..., :self.embedding_dim]
-                weight_values = embeddings[..., self.embedding_dim:]
+                weight_keys = embeddings[..., :self.weight_embedding_dim]
+                weight_values = embeddings[..., self.weight_embedding_dim:]
+                """
+                1. Dot product
+                   'i,i->' → sum_i a[i] * b[i]
+                
+                2. Matrix multiplication
+                   'ij,jk->ik' → C[i,k] = sum_j A[i,j] * B[j,k]
+                
+                3. Transpose
+                   'ij->ji' → Swap rows and columns of the matrix
+                
+                4. Reduction / Sum
+                   'ij->i' → Sum over dimension j, keep dimension i
+                
+                5. Outer product
+                   'i,j->ij' → Create matrix: C[i,j] = a[i] * b[j]
+                """
                 mixture = tf.einsum("j,ij->i", weight_emb, weight_keys)
                 mixture = tf.nn.softmax(mixture)
                 weights.append(tf.einsum("i,ij->j", mixture, weight_values))
@@ -172,7 +240,7 @@ class SeparateTransformerIO(SimpleTransformerIO):
         with tf.name_scope(None, default_name="weight_decoder"):
             weights = []
             for i in range(self.num_weights):
-                weights.append(embeddings[i, self.weight_embedding_dim :])
+                weights.append(embeddings[i, self.weight_embedding_dim:])
             return weights
 
 
@@ -184,8 +252,9 @@ class JointTransformerIO(TransformerIO):
         with tf.name_scope(None, default_name="sample_encoder"):
             batch_size = images.shape[0]
             images = tf.reshape(images, [batch_size, -1])
-            encoded_labels = self.encode_labels(labels)
+            encoded_labels = self._encode_labels(labels)
             sequence = tf.concat([encoded_labels, images], axis=-1)
+
         with tf.name_scope(None, default_name="weight_encoder"):
             weight_sequence = []
             for i in range(self.num_weights):
@@ -205,7 +274,7 @@ class JointTransformerIO(TransformerIO):
         with tf.name_scope(None, default_name="weight_decoder"):
             weights = []
             for i in range(self.num_weights):
-                weights.append(embeddings[i, self.embedding_dim :])
+                weights.append(embeddings[i, self.weight_embedding_dim:])
             return weights
 
 

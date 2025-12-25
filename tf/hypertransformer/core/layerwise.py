@@ -197,6 +197,9 @@ class JointGenerator(Generator):
     def _setup(self):
         with tf.variable_scope(self.name + "_setup"):
             self._make_feature_extractor()
+
+            assert self.num_weight_blocks
+            assert self.weight_block_size
             self.transformer_io = util.JointTransformerIO(
                 num_labels=self.model_config.num_labels,
                 num_weights=self.num_weight_blocks,
@@ -292,6 +295,9 @@ class SeparateGenerator(Generator):
     def _setup(self):
         with tf.variable_scope(self.name + "_setup"):
             self._make_feature_extractor()
+
+            assert self.num_weight_blocks
+            assert self.weight_block_size
             self.transformer_io = util.SeparateTransformerIO(
                 num_labels=self.model_config.num_labels,
                 num_weights=self.num_weight_blocks,
