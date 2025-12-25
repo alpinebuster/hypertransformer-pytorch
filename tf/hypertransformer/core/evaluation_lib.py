@@ -47,7 +47,7 @@ def dataset_with_custom_labels(
 ) -> tuple[common_ht.DatasetSamples, Optional[List[int]]]:
     """Returns a dataset with a controlled label set (should be reshuffled)."""
     custom_labels = copy.copy(dataset_config.use_label_subset)
-    dataset_config = dataclasses.replace( # pytype: disable=wrong-arg-types  # dataclasses-replace-types
+    dataset_config = dataclasses.replace(
         dataset_config, use_label_subset=lambda: custom_labels
     )
     dataset, _ = train_lib.make_dataset(
@@ -119,26 +119,6 @@ def evaluate_dataset(
     return test_accs, all_accs
 
 
-def evaluation_loop(
-    state: common.TrainState,
-    custom_labels,
-    dataset: common_ht.DatasetSamples,
-    assign_op,
-    outputs: common.ModelOutputs,
-    eval_config: EvaluationConfig,
-):
-    """Model evaluation loop."""
-    with tf.Session():
-        common.init_training(state)
-        return evaluate_dataset(
-            custom_labels=custom_labels,
-            dataset=dataset,
-            assign_op=assign_op,
-            outputs=outputs,
-            eval_config=eval_config,
-        )
-
-
 def apply_layerwise_model(
     model: layerwise.LayerwiseModel,
     model_config: common_ht.LayerwiseModelConfig,
@@ -158,41 +138,3 @@ def apply_layerwise_model(
     accuracy = tf.reduce_sum(accuracy) / model_config.num_cnn_samples
 
     return common.ModelOutputs(predictions=pred_labels, accuracy=accuracy)
-
-
-def build_layerwise_model(
-    model_config: common_ht.LayerwiseModelConfig,
-    dataset: common_ht.DatasetSamples,
-):
-    """Builds a layerwise model."""
-    model = layerwise.build_model(
-        model_config.cnn_model_name, model_config=model_config
-    )
-    return apply_layerwise_model(model, model_config=model_config, dataset=dataset)
-
-
-def evaluate_layerwise(
-    model_config: common_ht.LayerwiseModelConfig,
-    dataset_config: common_ht.DatasetConfig,
-    eval_config: EvaluationConfig,
-):
-    """Evaluates a pretrained 'layerwise' model."""
-    dataset, custom_labels = dataset_with_custom_labels(model_config, dataset_config)
-    images, labels, assign_op = make_train_samples(dataset, same_batch=True)
-    dataset.transformer_images, dataset.transformer_labels = images, labels
-    outputs = build_layerwise_model(model_config, dataset)
-
-    load_vars = eval_config.load_vars
-    if callable(load_vars):
-        load_vars = load_vars()
-
-    state = common.TrainState(train_op=tf.no_op(), saver=tf.train.Saver(load_vars))
-
-    return evaluation_loop(
-        state=state,
-        custom_labels=custom_labels,
-        dataset=dataset,
-        assign_op=assign_op,
-        outputs=outputs,
-        eval_config=eval_config,
-    )

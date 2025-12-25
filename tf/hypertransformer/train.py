@@ -3,8 +3,7 @@
 import functools
 from typing import Optional
 
-from absl import app
-from absl import flags
+from absl import app, flags, logging
 
 import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 
@@ -525,7 +524,7 @@ def main(argv):
     if len(argv) > 1:
         raise app.UsageError("Too many command-line arguments.")
 
-    tf.logging.info(f"\nFLAGS: {FLAGS.flag_values_dict()}\n")
+    logging.info(f"\nFLAGS: {FLAGS.flag_values_dict()}\n")
 
     tf.disable_eager_execution()
     for gpu in tf.config.list_physical_devices("GPU"):
