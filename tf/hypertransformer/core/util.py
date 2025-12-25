@@ -183,7 +183,7 @@ class SimpleTransformerIO(TransformerIO):
 
     def encode_samples(self, images, labels):
         """Generates Transformer inputs from input samples."""
-        with tf.name_scope(None, default_name="sample_encoder"):
+        with tf.name_scope(name=None, default_name="sample_encoder"):
             batch_size = images.shape[0]
             #                                        I_l
             images = tf.reshape(images, [batch_size, -1])
@@ -201,7 +201,7 @@ class SimpleTransformerIO(TransformerIO):
 
     def decode_weights(self, embeddings):
         """Generates weight patches from Transformer outputs."""
-        with tf.name_scope(None, default_name="weight_decoder"):
+        with tf.name_scope(name=None, default_name="weight_decoder"):
             weights = []
             for weight_emb in self.weight_embs:
                 weight_keys = embeddings[..., :self.weight_embedding_dim]
@@ -233,7 +233,7 @@ class SeparateTransformerIO(SimpleTransformerIO):
 
     def encode_weights(self):
         """Generates weight patches from Transformer outputs."""
-        with tf.name_scope(None, default_name="weight_encoder"):
+        with tf.name_scope(name=None, default_name="weight_encoder"):
             tokens = []
             for i in range(self.num_weights):
                 tensors = [
@@ -247,7 +247,7 @@ class SeparateTransformerIO(SimpleTransformerIO):
 
     def decode_weights(self, embeddings):
         """Generates weight patches from Transformer outputs."""
-        with tf.name_scope(None, default_name="weight_decoder"):
+        with tf.name_scope(name=None, default_name="weight_decoder"):
             weights = []
             for i in range(self.num_weights):
                 weights.append(embeddings[i, self.weight_embedding_dim:])
@@ -259,14 +259,14 @@ class JointTransformerIO(TransformerIO):
 
     def encode_samples(self, images, labels):
         """Generates Transformer inputs from input samples."""
-        with tf.name_scope(None, default_name="sample_encoder"):
+        with tf.name_scope(name=None, default_name="sample_encoder"):
             batch_size = images.shape[0]
             #                                        I_l
             images = tf.reshape(images, [batch_size, -1])
             encoded_labels = self._encode_labels(labels)
             sequence = tf.concat([encoded_labels, images], axis=-1)
 
-        with tf.name_scope(None, default_name="weight_encoder"):
+        with tf.name_scope(name=None, default_name="weight_encoder"):
             weight_sequence = []
             for i in range(self.num_weights):
                 weight_emb = self.weight_embs[i]
@@ -291,7 +291,7 @@ class JointTransformerIO(TransformerIO):
 
     def decode_weights(self, embeddings):
         """Generates weight patches from Transformer outputs."""
-        with tf.name_scope(None, default_name="weight_decoder"):
+        with tf.name_scope(name=None, default_name="weight_decoder"):
             weights = []
             for i in range(self.num_weights):
                 weights.append(embeddings[i, self.weight_embedding_dim:])

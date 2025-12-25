@@ -157,7 +157,7 @@ def _make_dataset_helper_unbalanced(
     numpy_arr = _make_numpy_array(data_config, batch_size, sess)
     config = make_augmentation_config(data_config=data_config, num_labels=num_labels)
 
-    with tf.name_scope(None, default_name="data"):
+    with tf.name_scope(name=None, default_name="data"):
         gen = datasets.TaskGenerator(
             numpy_arr,
             num_labels=num_labels,
@@ -195,7 +195,7 @@ def _make_dataset_helper_balanced(
     numpy_arr = _make_numpy_array(data_config, NUMPY_BATCH_SIZE, sess)
     config = make_augmentation_config(data_config=data_config, num_labels=num_labels)
 
-    with tf.name_scope(None, default_name="data"):
+    with tf.name_scope(name=None, default_name="data"):
         gen = datasets.TaskGenerator(
             numpy_arr,
             num_labels=num_labels,

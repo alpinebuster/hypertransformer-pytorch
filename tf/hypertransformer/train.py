@@ -1,6 +1,7 @@
 """Training binary."""
 
 import functools
+from typing import Optional
 
 from absl import app
 from absl import flags
@@ -229,7 +230,7 @@ def _make_warmup_loss(loss_heads, loss_prediction, global_step):
     return loss, weights
 
 
-def make_loss(labels, predictions, heads):
+def make_loss(labels, predictions, heads: list):
     """Makes a full loss including head 'warmup' losses."""
     losses = []
     for head in heads + [predictions]:
@@ -245,7 +246,12 @@ def make_loss(labels, predictions, heads):
     return loss, losses, wamup_weights
 
 
-def create_shared_head(shared_features, real_classes, real_class_min, real_class_max):
+def create_shared_head(
+    shared_features,
+    real_classes,
+    real_class_min: Optional[int],
+    real_class_max: Optional[int]
+):
     """Creates a real class prediction head from the shared feature."""
     if real_classes is None or shared_features is None:
         return None, None
@@ -255,10 +261,12 @@ def create_shared_head(shared_features, real_classes, real_class_min, real_class
             "Skipping shared head creation!"
         )
         return None, None
+
     total_classes = real_class_max - real_class_min + 1
     with tf.variable_scope("shared_head", reuse=tf.AUTO_REUSE):
         fc = tf.layers.Dense(units=total_classes, name="fc")
         predictions = fc(shared_features)
+
     classes = real_classes - real_class_min
     one_hot_gt = tf.one_hot(classes, depth=total_classes)
     loss = tf.losses.softmax_cross_entropy(
@@ -268,6 +276,7 @@ def create_shared_head(shared_features, real_classes, real_class_min, real_class
     accuracy = tf.cast(tf.math.equal(classes, pred_classes), tf.float32)
     num_samples = tf.cast(tf.shape(shared_features)[0], tf.float32)
     accuracy = tf.reduce_sum(accuracy) / num_samples
+
     return loss, accuracy
 
 
@@ -303,6 +312,7 @@ def create_layerwise_model(
         heads = []
         if model_config.train_heads:
             outputs = model_builder.layer_outputs.values()
+            # layer_outputs[layer.name] => (inputs, head)
             heads = [output[1] for output in outputs if output[1] is not None]
 
         test_weight_blocks = model_builder.train(

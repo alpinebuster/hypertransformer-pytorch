@@ -123,6 +123,8 @@ class Generator:
     def _features(self, input_tensor, shared_features=None, enable_fe_dropout=False):
         """Returns full feature vector (per-layer and shared if specified)."""
         if self.feature_extractor is not None:
+            # feature_extractor -> Activation Feature Extractor
+            # shared_features   -> Image Feature Extractor
             features = self.feature_extractor(input_tensor)
             if enable_fe_dropout and self.model_config.fe_dropout > 0.0:
                 dropout = tf.layers.Dropout(rate=self.model_config.fe_dropout)
@@ -253,6 +255,7 @@ class JointGenerator(Generator):
             )
             with tf.variable_scope("feature_padding"):
                 features, transformer_embedding_size = self._pad_features(features)
+
             with tf.variable_scope("transformer"):
                 if self.transformer is None:
                     if self.model_config.use_decoder:
