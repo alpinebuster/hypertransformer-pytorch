@@ -299,6 +299,7 @@ def create_layerwise_model(
             weight_blocks=weight_blocks,
             training=False,
         )
+
         heads = []
         if model_config.train_heads:
             outputs = model_builder.layer_outputs.values()
@@ -310,7 +311,9 @@ def create_layerwise_model(
             mask=test_dataset.transformer_masks,
         )
         test_predictions = model_builder.evaluate(
-            test_dataset.cnn_images, weight_blocks=test_weight_blocks, training=False
+            test_dataset.cnn_images,
+            weight_blocks=test_weight_blocks,
+            training=False,
         )
 
     with tf.variable_scope("loss"):
@@ -367,7 +370,6 @@ def create_layerwise_model(
 
     for head_id, acc in enumerate(head_accs):
         summaries.append(tf.summary.scalar(f"accuracy/head-{head_id+1}", acc))
-
     for head_id, warmup_weight in enumerate(warmup_weights[:-1]):
         summaries.append(
             tf.summary.scalar(f"warmup_weights/head-{head_id+1}", warmup_weight)
@@ -375,15 +377,13 @@ def create_layerwise_model(
     if heads:
         summaries.append(tf.summary.scalar("warmup_weights/main", warmup_weights[-1]))
 
-    train_op = make_train_op(optimizer, state.loss)
-
     if shared_head_acc is not None and model_config.shared_head_weight > 0.0:
         summaries.append(
             tf.summary.scalar("accuracy/shared_head_accuracy", shared_head_acc)
         )
 
     return common.TrainState(
-        train_op=train_op,
+        train_op=make_train_op(optimizer, state.loss),
         step_initializer=tf.group(dataset.randomize_op, test_dataset.randomize_op),
         large_summaries=[],
         small_summaries=summaries
@@ -433,10 +433,8 @@ def create_shared_feature_model(
         _, optimizer = make_optimizer(optim_config, global_step)
         state.loss = shared_head_loss
 
-    train_op = make_train_op(optimizer, state.loss)
-
     return common.TrainState(
-        train_op=train_op,
+        train_op=make_train_op(optimizer, state.loss),
         step_initializer=tf.group(dataset.randomize_op),
         large_summaries=[],
         small_summaries=[

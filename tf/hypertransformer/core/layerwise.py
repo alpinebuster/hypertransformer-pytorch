@@ -417,7 +417,7 @@ class BaseCNNLayer(tf.Module):
     def __call__(self, inputs, training=True):
         raise NotImplementedError
 
-    def var_getter(self, offsets, weights, shape, name):
+    def _var_getter(self, offsets, weights, shape, name):
         raise NotImplementedError
 
     def create(
@@ -464,7 +464,7 @@ class BaseCNNLayer(tf.Module):
 
         variable_getter = functools.partial(
             util.var_getter_wrapper,
-            _cnn_var_getter=self.var_getter,
+            _cnn_var_getter=self._var_getter,
             _weights=weight_blocks,
             _getter_dict=self.getter_dict,
             _add_trainable_weights=self.model_config.add_trainable_weights,
@@ -478,143 +478,6 @@ class BaseCNNLayer(tf.Module):
         ):
             # Equal to call `self.__call__(...)`
             return self(input_tensor, *args, **kwargs)
-
-
-# ------------------------------------------------------------
-#   Layerwise model class
-# ------------------------------------------------------------
-
-
-class LayerwiseModel(common_ht.Model):
-    """Model specification including layer builders."""
-
-    def __init__(self, layers: "list[ConvLayer | BaseCNNLayer]", model_config: LayerwiseModelConfig):
-        super().__init__()
-
-        self.layers = layers
-        self.shared_feature_extractor = feature_extractors.get_shared_feature_extractor(
-            model_config
-        )
-        self.separate_bn_variables = model_config.separate_bn_vars
-        self._number_of_trained_cnn_layers = model_config.number_of_trained_cnn_layers
-        self.shared_fe_dropout = model_config.shared_fe_dropout
-        self.fe_dropout = model_config.fe_dropout
-        self.model_config = model_config
-
-    def train(
-        self,
-        inputs,
-        labels,
-        mask=None,
-        mask_random_samples=False,
-        enable_fe_dropout=False,
-        only_shared_feature=False,
-    ):
-        """Builds an entire CNN model using train inputs."""
-        all_weight_blocks = []
-        all_head_blocks = {}
-        shared_features = None
-        if self.shared_feature_extractor is not None:
-            shared_features = self.shared_feature_extractor(inputs)
-            if enable_fe_dropout and self.shared_fe_dropout > 0.0:
-                dropout = tf.layers.Dropout(rate=self.shared_fe_dropout)
-                shared_features = dropout(shared_features, training=True)
-
-        if only_shared_feature:
-            return GeneratedWeights(
-                weight_blocks=[],
-                head_weight_blocks={},
-                shared_features=shared_features,
-            )
-
-        if mask_random_samples:
-            mask = remove_some_samples(labels, self.model_config, mask)
-
-        num_trained_layers = abs(self._number_of_trained_cnn_layers)
-        # Last layer is always a LogitsLayer and we always generate it.
-        num_generated_layers = len(self.layers) - num_trained_layers - 1
-        if num_generated_layers < 0:
-            raise ValueError(
-                "num_trained_layers should be smaller that the total "
-                "number of conv layers."
-            )
-
-        is_first_trained = self._number_of_trained_cnn_layers >= 0
-        if is_first_trained:
-            generate_weights_per_layers = (
-                [False] * num_trained_layers + [True] * num_generated_layers + [True]
-            )
-        else:
-            generate_weights_per_layers = (
-                [True] * num_generated_layers + [False] * num_trained_layers + [True]
-            )
-
-        for layer, generate_weights in zip(self.layers, generate_weights_per_layers):
-            with tf.variable_scope("cnn_builder"):
-                weight_blocks = layer.create(
-                    input_tensor=inputs,
-                    labels=labels,
-                    mask=mask,
-                    shared_features=shared_features,
-                    enable_fe_dropout=enable_fe_dropout,
-                    generate_weights=generate_weights,
-                )
-                all_weight_blocks.append(weight_blocks)
-            with tf.variable_scope("cnn"):
-                inputs = layer.apply(
-                    inputs,
-                    weight_blocks=weight_blocks,
-                    training=True,
-                    separate_bn_variables=self.separate_bn_variables,
-                )
-            if layer.head is not None:
-                with tf.variable_scope("cnn_builder_heads"):
-                    head_blocks = layer.head.create(
-                        input_tensor=inputs,
-                        labels=labels,
-                        mask=mask,
-                        shared_features=shared_features,
-                        enable_fe_dropout=enable_fe_dropout,
-                    )
-                    all_head_blocks[layer.name] = head_blocks
-
-        return GeneratedWeights(
-            weight_blocks=all_weight_blocks,
-            head_weight_blocks=all_head_blocks,
-            shared_features=shared_features,
-        )
-
-    def evaluate(
-        self,
-        inputs,
-        weight_blocks=None,
-        training=True,
-    ):
-        """Passes input tensors through a built CNN model."""
-        if weight_blocks is None:
-            raise ValueError("weight_blocks must be provided")
-
-        self.layer_outputs = {}
-        with tf.variable_scope("cnn"):
-            for layer, layer_blocks in zip(self.layers, weight_blocks.weight_blocks):
-                inputs = layer.apply(
-                    inputs,
-                    weight_blocks=layer_blocks,
-                    training=training,
-                    evaluation=True,
-                    separate_bn_variables=self.separate_bn_variables,
-                )
-                head = None
-                if layer.head is not None:
-                    head = layer.head.apply(
-                        inputs,
-                        weight_blocks=weight_blocks.head_weight_blocks[layer.name],
-                        training=training,
-                        evaluation=True,
-                        separate_bn_variables=self.separate_bn_variables,
-                    )
-                self.layer_outputs[layer.name] = (inputs, head)
-        return inputs
 
 
 # ------------------------------------------------------------
@@ -707,9 +570,9 @@ class ConvLayer(BaseCNNLayer):
             self.conv_weight_size = self.block_size
 
             if self.generate_bias:
-                self.block_size += 1
+                self.block_size += 1 # + 1 bias
             if self.generate_bn:
-                self.block_size += 2
+                self.block_size += 2 # + gamma + beta
 
             self.stack_axis = -1
         else:
@@ -755,19 +618,36 @@ class ConvLayer(BaseCNNLayer):
                 padding="valid",
             )
             output = maxpool(output)
+        
+        """
         # Batch normalization is always in the training mode.
+        #
+        # ------------------------------------------------------------------
+        # In a standard CNN:
+        #   - During training, training=True  -> use batch mean/variance
+        #   - During testing,  training=False -> use global mean/variance (moving averages) from training
+        #   Assumes train/test data come from the same distribution.
+        #
+        # In this hypertransformer + few-shot setting:
+        #   - Each forward pass is a new task (e.g., "cat vs dog", then "plane vs ship")
+        #   - CNN weights are generated per task, not fixed
+        #   - There is no stable global feature distribution
+        #
+        # Therefore, BatchNorm must always use batch statistics (training=True)
+        # to normalize features based on the current task's data.
+        """
         output = self.bn(output, training=True)
         if self.act_after_bn:
             output = self.act_fn(output)
         return output
 
-    def var_getter(self, offsets, weights, shape, name):
+    def _var_getter(self, offsets, weights, shape, name):
         if name.endswith("/kernel"):
             if self.generate_weights:
                 """Take the kernel part from each w
                 w = [
                     conv_kernel_flat...,   # conv_weight_size
-                    bias,                  # 1
+                    bias,                  # 1 bias
                     gamma,                 # 1 BN
                     beta                   # 1 BN
                 ]
@@ -813,7 +693,14 @@ class ConvLayer(BaseCNNLayer):
 
 
 class LogitsLayer(BaseCNNLayer):
-    """Logits layer of the CNN."""
+    """Logits layer of the CNN.
+
+       [batch, H, W, C]
+            ↓
+       [batch, C]
+            ↓
+       [batch, num_labels]
+    """
 
     def __init__(
         self,
@@ -858,7 +745,7 @@ class LogitsLayer(BaseCNNLayer):
 
         self.generator.set_weight_params(
             num_weight_blocks=self.model_config.num_labels,
-            weight_block_size=self.input_dim + 1,
+            weight_block_size=self.input_dim + 1, # + 1 bias
         )
         self.generator.set_feature_extractor_class(feature_extractor_class)
 
@@ -870,9 +757,10 @@ class LogitsLayer(BaseCNNLayer):
         # [batch, channels]
         tensor = tf.reduce_mean(tensor, axis=[1, 2])
         dropout_tensor = self.dropout(tensor, training=training)
+        # [batch, channels] → [batch, num_labels]
         return self.fc(dropout_tensor)
 
-    def var_getter(self, offsets, weights, shape, name):
+    def _var_getter(self, offsets, weights, shape, name):
         if weights is None:
             return None
 
@@ -893,7 +781,14 @@ class LogitsLayer(BaseCNNLayer):
 
 
 class FlattenLogitsLayer(LogitsLayer):
-    """Logits layer of the CNN that flattens its input (instead of averaging)."""
+    """Logits layer of the CNN that flattens its input (instead of averaging).
+
+       [batch, H, W, C]
+            ↓
+       [batch, H*W*C]
+            ↓
+       [batch, num_labels]
+    """
 
     def _setup(self, inputs):
         """Input-specific setup."""
@@ -925,13 +820,160 @@ class FlattenLogitsLayer(LogitsLayer):
 
         self.generator.set_weight_params(
             num_weight_blocks=self.model_config.num_labels,
-            weight_block_size=self.input_dim * width * height + 1,
+            weight_block_size=self.input_dim * width * height + 1, # + 1 bias
         )
         self.generator.set_feature_extractor_class(feature_extractor_class)
 
     def __call__(self, tensor, training=True):
+        # [batch, H, W, C] → [batch, H*W*C]
         flatten = tf.layers.Flatten()
 
+        # [batch, H*W*C] → [batch, num_labels]
         self.fc = tf.layers.Dense(units=self.model_config.num_labels, name="fc")
         dropout_tensor = self.dropout(flatten(tensor), training=training)
         return self.fc(dropout_tensor)
+
+
+# ------------------------------------------------------------
+#   Layerwise model class
+# ------------------------------------------------------------
+
+
+class LayerwiseModel(common_ht.Model):
+    """Model specification including layer builders."""
+
+    def __init__(self, layers: "list[ConvLayer | BaseCNNLayer]", model_config: LayerwiseModelConfig):
+        super().__init__()
+
+        self.layers = layers
+        self.shared_feature_extractor = feature_extractors.get_shared_feature_extractor(
+            model_config
+        )
+        self.separate_bn_variables = model_config.separate_bn_vars
+
+        #   = 0 : freeze all CNN layers (no backpropagation through CNN)
+        #   > 0 : train the first N CNN layers
+        #   < 0 : train the last |N| CNN layers
+        self._number_of_trained_cnn_layers = model_config.number_of_trained_cnn_layers
+        self.shared_fe_dropout = model_config.shared_fe_dropout
+        self.fe_dropout = model_config.fe_dropout
+        self.model_config = model_config
+
+    def train(
+        self,
+        inputs,
+        labels,
+        mask=None,
+        mask_random_samples=False,
+        enable_fe_dropout=False,
+        only_shared_feature=False,
+    ):
+        """Builds an entire CNN model using train inputs."""
+        all_weight_blocks = []
+        all_head_blocks = {}
+
+        shared_features = None
+        if self.shared_feature_extractor is not None:
+            shared_features = self.shared_feature_extractor(inputs)
+            if enable_fe_dropout and self.shared_fe_dropout > 0.0:
+                dropout = tf.layers.Dropout(rate=self.shared_fe_dropout)
+                shared_features = dropout(shared_features, training=True)
+
+        if only_shared_feature:
+            return GeneratedWeights(
+                weight_blocks=[],
+                head_weight_blocks={},
+                shared_features=shared_features,
+            )
+
+        if mask_random_samples:
+            mask = remove_some_samples(labels, self.model_config, mask)
+
+        num_trained_layers = abs(self._number_of_trained_cnn_layers)
+        # Last layer is always a LogitsLayer and we always generate it.
+        num_generated_layers = len(self.layers) - num_trained_layers - 1
+        if num_generated_layers < 0:
+            raise ValueError(
+                "num_trained_layers should be smaller that the total "
+                "number of conv layers."
+            )
+
+        is_first_trained = self._number_of_trained_cnn_layers >= 0
+        if is_first_trained:
+            generate_weights_per_layers = (
+                [False] * num_trained_layers + [True] * num_generated_layers + [True]
+            )
+        else:
+            generate_weights_per_layers = (
+                [True] * num_generated_layers + [False] * num_trained_layers + [True]
+            )
+
+        for layer, generate_weights in zip(self.layers, generate_weights_per_layers):
+            with tf.variable_scope("cnn_builder"):
+                weight_blocks = layer.create(
+                    input_tensor=inputs,
+                    labels=labels,
+                    mask=mask,
+                    shared_features=shared_features,
+                    enable_fe_dropout=enable_fe_dropout,
+                    generate_weights=generate_weights,
+                )
+                all_weight_blocks.append(weight_blocks)
+            with tf.variable_scope("cnn"):
+                inputs = layer.apply(
+                    inputs,
+                    weight_blocks=weight_blocks,
+                    training=True,
+                    separate_bn_variables=self.separate_bn_variables,
+                )
+
+            if layer.head is not None:
+                with tf.variable_scope("cnn_builder_heads"):
+                    head_blocks = layer.head.create(
+                        input_tensor=inputs,
+                        labels=labels,
+                        mask=mask,
+                        shared_features=shared_features,
+                        enable_fe_dropout=enable_fe_dropout,
+                    )
+                    all_head_blocks[layer.name] = head_blocks
+
+        return GeneratedWeights(
+            weight_blocks=all_weight_blocks,
+            head_weight_blocks=all_head_blocks,
+            shared_features=shared_features,
+        )
+
+    def evaluate(
+        self,
+        inputs,
+        weight_blocks=None,
+        training=True,
+    ):
+        """Passes input tensors through a built CNN model."""
+        if weight_blocks is None:
+            raise ValueError("weight_blocks must be provided")
+
+        self.layer_outputs = {}
+        with tf.variable_scope("cnn"):
+            for layer, layer_blocks in zip(self.layers, weight_blocks.weight_blocks):
+                inputs = layer.apply(
+                    inputs,
+                    weight_blocks=layer_blocks,
+                    training=training,
+                    evaluation=True,
+                    separate_bn_variables=self.separate_bn_variables,
+                )
+
+                head = None
+                if layer.head is not None:
+                    head = layer.head.apply(
+                        inputs,
+                        weight_blocks=weight_blocks.head_weight_blocks[layer.name],
+                        training=training,
+                        evaluation=True,
+                        separate_bn_variables=self.separate_bn_variables,
+                    )
+                self.layer_outputs[layer.name] = (inputs, head)
+
+        return inputs

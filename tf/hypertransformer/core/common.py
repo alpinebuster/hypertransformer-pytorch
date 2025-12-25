@@ -129,7 +129,7 @@ def train(train_config: TrainConfig, state: TrainState, run_options=None) -> Non
     first_step = step
     starting_time = time.time()
 
-    def save():
+    def _save():
         state.saver.save(
             sess,
             os.path.join(FLAGS.train_log_dir, state.checkpoint_suffix),
@@ -159,7 +159,7 @@ def train(train_config: TrainConfig, state: TrainState, run_options=None) -> Non
             train_config.steps_between_saves > 0
             and step % train_config.steps_between_saves == 0
         ):
-            save()
+            _save()
 
         if step % train_config.small_summaries_every == 0 and _is_not_empty(
             state.small_summaries
@@ -187,7 +187,7 @@ def train(train_config: TrainConfig, state: TrainState, run_options=None) -> Non
             )
 
     # Final save.
-    save()
+    _save()
 
 
 def init_training(state: TrainState) -> bool:
