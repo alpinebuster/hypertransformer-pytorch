@@ -4,7 +4,7 @@ import functools
 import glob
 import os
 
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable, Optional
 
 import tensorflow as tf2
 import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
@@ -15,10 +15,11 @@ from hypertransformer.core import transformer
 TransformerParamsFn = Callable[[int], transformer.TransformerParams]
 
 
-def var_getter_wrapper(getter, name, *args, **kwargs):
+def var_getter_wrapper(getter, name: str, *args, **kwargs):
     """Convenient wrapper around CNN variable getters."""
-    weights = kwargs.pop("_weights")
     shape = kwargs.get("shape")
+
+    weights = kwargs.pop("_weights")
     cnn_var_getter = kwargs.pop("_cnn_var_getter")
     getter_dict = kwargs.pop("_getter_dict")
     add_trainable_weights = kwargs.pop("_add_trainable_weights", False)
@@ -75,15 +76,50 @@ def var_getter_wrapper(getter, name, *args, **kwargs):
 
 
 class TransformerIO(tf.Module):
-    """Encoder and decoder interfacing with the Transformer."""
+    """Encoder and decoder interfacing with the Transformer.
+
+    1. SimpleTransformerIO
+       W is query, which is read outside the Transformer
+
+        [ L   | I... ]  --> Transformer               --> [K | V] (memory)
+        [ W_i | 0..0 ]  --> Attention, dot(W,K^T) × V --> decoded_weight
+
+    2. SeparateTransformerIO
+       W is a token, but it is not in the same sequence as L/I
+
+        [ W_i | 0..0 ]  --> Transformer --> [ W_i | decoded_weight_i ]
+        [ L   | I... ]  --> Transformer --> [ sample_output ]
+
+    3. JointTransformerIO
+       Both W and L/I are tokens and can pay attention to each other
+
+        [[ W_i | 0..0 ]     [ W_i | decoded_weight_i ]
+             ...        -->            ...
+         [ L   | I... ]]    [ sample_output          ]
+
+    Notation (vector-level representation):
+
+       weight token = [ weight_emb |   zeros    ]
+                       ←-- D_w --→  ←-- I_w --→
+
+       label token  = [ label_emb  | images_emb ]
+                       ←-- D_l --→  ←-- I_l --→
+
+       a) W_i = [ w1 , w2 , ... ]
+           Weight embedding for the i-th weight block.
+           This vector represents the identity or query of a learnable weight.
+
+       b) L   = [ l1 , l2 , ... ]
+           Label embedding. A continuous vector representation of a discrete class label.
+    """
 
     def __init__(
         self,
-        num_labels,
-        num_weights,
-        weight_block_size,
-        embedding_dim=8,
-        weight_embedding_dim=None,
+        num_labels: int,
+        num_weights: int,
+        weight_block_size: int, # I_w
+        embedding_dim=8, # D_w
+        weight_embedding_dim=None, # D_l
     ):
         self.num_labels = num_labels
         self.num_weights = num_weights
@@ -94,8 +130,9 @@ class TransformerIO(tf.Module):
         self.weight_block_size = weight_block_size
         self.label_embs = []
         self.weight_embs = []
+
         with tf.variable_scope(None, default_name="label_embeddings"):
-            # 1 additional class is reserved for "no label" class
+            # One additional class is reserved for "no label" class
             for label_idx in range(self.num_labels + 1):
                 self.label_embs.append(
                     tf.get_variable(
@@ -106,6 +143,7 @@ class TransformerIO(tf.Module):
                     )
                 )
         self.label_embs = tf.stack(self.label_embs, axis=0)
+
         with tf.variable_scope(None, default_name="weight_embeddings"):
             for weight_idx in range(num_weights):
                 self.weight_embs.append(
@@ -117,9 +155,27 @@ class TransformerIO(tf.Module):
                     )
                 )
 
-    def encode_labels(self, labels):
-        """Generates label encodings."""
+    def _encode_labels(self, labels):
+        """Generates label encodings.
+
+        e.g. `tf.gather`
+           label_embs = [
+               [1.0, 0.0],   # 0
+               [0.0, 1.0],   # 1
+               [1.0, 1.0],   # 2
+           ]
+   
+           labels = [2, 0]
+   
+           tf.gather(label_embs, labels, axis=0) == [
+               [1.0, 1.0],   # index 2
+               [1.0, 0.0],   # index 0
+           ]
+        """
         return tf.gather(self.label_embs, labels, axis=0)
+
+    def decode_weights(self, embeddings):
+        raise NotImplementedError
 
 
 class SimpleTransformerIO(TransformerIO):
@@ -127,10 +183,17 @@ class SimpleTransformerIO(TransformerIO):
 
     def encode_samples(self, images, labels):
         """Generates Transformer inputs from input samples."""
-        with tf.name_scope(None, default_name="sample_encoder"):
+        with tf.name_scope(name=None, default_name="sample_encoder"):
             batch_size = images.shape[0]
+            #                                        I_l
             images = tf.reshape(images, [batch_size, -1])
-            encoded_labels = self.encode_labels(labels)
+            encoded_labels = self._encode_labels(labels)
+            """
+            encoded_labels: [batch_size, label_dim]
+            images:         [batch_size, image_dim]
+                             ↓
+            [batch_size, label_dim + image_dim]
+            """
             return tf.concat([encoded_labels, images], axis=-1)
 
     def extend_label_mask(self, label_mask):
@@ -138,11 +201,27 @@ class SimpleTransformerIO(TransformerIO):
 
     def decode_weights(self, embeddings):
         """Generates weight patches from Transformer outputs."""
-        with tf.name_scope(None, default_name="weight_decoder"):
+        with tf.name_scope(name=None, default_name="weight_decoder"):
             weights = []
             for weight_emb in self.weight_embs:
-                weight_keys = embeddings[..., :self.embedding_dim]
-                weight_values = embeddings[..., self.embedding_dim:]
+                weight_keys = embeddings[..., :self.weight_embedding_dim]
+                weight_values = embeddings[..., self.weight_embedding_dim:]
+                """
+                1. Dot product
+                   'i,i->' → sum_i a[i] * b[i]
+                
+                2. Matrix multiplication
+                   'ij,jk->ik' → C[i,k] = sum_j A[i,j] * B[j,k]
+                
+                3. Transpose
+                   'ij->ji' → Swap rows and columns of the matrix
+                
+                4. Reduction / Sum
+                   'ij->i' → Sum over dimension j, keep dimension i
+                
+                5. Outer product
+                   'i,j->ij' → Create matrix: C[i,j] = a[i] * b[j]
+                """
                 mixture = tf.einsum("j,ij->i", weight_emb, weight_keys)
                 mixture = tf.nn.softmax(mixture)
                 weights.append(tf.einsum("i,ij->j", mixture, weight_values))
@@ -154,7 +233,7 @@ class SeparateTransformerIO(SimpleTransformerIO):
 
     def encode_weights(self):
         """Generates weight patches from Transformer outputs."""
-        with tf.name_scope(None, default_name="weight_encoder"):
+        with tf.name_scope(name=None, default_name="weight_encoder"):
             tokens = []
             for i in range(self.num_weights):
                 tensors = [
@@ -168,10 +247,10 @@ class SeparateTransformerIO(SimpleTransformerIO):
 
     def decode_weights(self, embeddings):
         """Generates weight patches from Transformer outputs."""
-        with tf.name_scope(None, default_name="weight_decoder"):
+        with tf.name_scope(name=None, default_name="weight_decoder"):
             weights = []
             for i in range(self.num_weights):
-                weights.append(embeddings[i, self.weight_embedding_dim :])
+                weights.append(embeddings[i, self.weight_embedding_dim:])
             return weights
 
 
@@ -180,12 +259,14 @@ class JointTransformerIO(TransformerIO):
 
     def encode_samples(self, images, labels):
         """Generates Transformer inputs from input samples."""
-        with tf.name_scope(None, default_name="sample_encoder"):
+        with tf.name_scope(name=None, default_name="sample_encoder"):
             batch_size = images.shape[0]
+            #                                        I_l
             images = tf.reshape(images, [batch_size, -1])
-            encoded_labels = self.encode_labels(labels)
+            encoded_labels = self._encode_labels(labels)
             sequence = tf.concat([encoded_labels, images], axis=-1)
-        with tf.name_scope(None, default_name="weight_encoder"):
+
+        with tf.name_scope(name=None, default_name="weight_encoder"):
             weight_sequence = []
             for i in range(self.num_weights):
                 weight_emb = self.weight_embs[i]
@@ -196,15 +277,24 @@ class JointTransformerIO(TransformerIO):
         return sequence
 
     def extend_label_mask(self, label_mask):
+        """
+        v---  num_weights  ---v\n
+        [0, 0, 0, ..., 0, 0, 0]
+                   ↓
+        label_mask = [m0, m1, m2, ..., mk]
+                   ↓
+        [0, 0, 0, ..., 0, 0, 0, m0, m1, m2, ..., mk]\n
+         ^--- num_weights ---^
+        """
         weight_mask = tf.zeros((self.num_weights,), dtype=tf.float32)
         return tf.concat([weight_mask, label_mask], axis=-1)
 
     def decode_weights(self, embeddings):
         """Generates weight patches from Transformer outputs."""
-        with tf.name_scope(None, default_name="weight_decoder"):
+        with tf.name_scope(name=None, default_name="weight_decoder"):
             weights = []
             for i in range(self.num_weights):
-                weights.append(embeddings[i, self.embedding_dim :])
+                weights.append(embeddings[i, self.weight_embedding_dim:])
             return weights
 
 
@@ -243,7 +333,7 @@ def parse_dataset_spec(dataset_spec: str):
     return dataset_spec, _parse_label_spec(label_spec)
 
 
-def nonlinearity(activation):
+def nonlinearity(activation: str):
     if activation == "relu":
         return tf.nn.relu
     elif activation == "gelu":
@@ -255,40 +345,42 @@ def nonlinearity(activation):
 
 
 def extract_checkpoint_step(s: str):
-    # Files have format prefix-<step>.index
+    # Files have format `prefix-<step>.index`
     return int(s.rsplit(".", 1)[0].rsplit("-", 1)[1])
 
 
-def find_latest_checkpoint(ckpt_dir):
+def find_latest_checkpoint(ckpt_dir: str):
     all_checkpoints = glob.glob(os.path.join(ckpt_dir, "*.index"))
     if not all_checkpoints:
         return None
+
     latest = sorted(all_checkpoints, key=extract_checkpoint_step)[0]
     return latest.rsplit(".", 1)[0]
 
 
-def latest_checkpoint(dir_or_checkpoint):
+def latest_checkpoint(dir_or_checkpoint: str):
     # That's actual checkpoint prefix.
     if not os.path.isdir(dir_or_checkpoint) and os.path.exists(
         dir_or_checkpoint + ".index"
     ):
         return dir_or_checkpoint
+
     # Rely on tensorflow latest_checkpoint but if no "checkpoint" is present just
     # scan the directory.
     latest = tf.train.latest_checkpoint(dir_or_checkpoint)
     return latest or find_latest_checkpoint(dir_or_checkpoint)
 
 
-class MultiFileWriter(object):
+class MultiFileWriter:
     """Summary writer that supports writing to multiple files at once."""
 
-    def __init__(self, logdir, *args, **kwargs):
+    def __init__(self, logdir: str, *args, **kwargs):
         self.summary_args = list(args)
         self.summary_kwargs = dict(kwargs)
         self.logdir = logdir
         self.writers = {}
 
-    def _get_writer(self, name=None):
+    def _get_writer(self, name: Optional[str] = None):
         if name not in self.writers:
             self.writers[name] = tf.summary.FileWriter(
                 os.path.join(self.logdir, name or ""),
@@ -313,7 +405,7 @@ class MultiFileWriter(object):
             each.flush()
 
 
-def _normalize_tag(tag):
+def _normalize_tag(tag: str):
     if "_" not in tag:
         return tag
     normalized_tag, value = tag.rsplit("_", 1)
@@ -340,11 +432,12 @@ def normalize_tags(s):
     raise ValueError(f"Unexpected input {s}")
 
 
-def load_variables(loc, var_list=None, step=None):
+def load_variables(loc: str, var_list=None, step=None):
     """Returns variables from a given checkpoint."""
     path = latest_checkpoint(loc)
     if path is None:
         raise FileNotFoundError(f'No checkpoint available found at "{loc}"')
+
     loc = path
     if step is not None:
         base, _ = loc.rsplit("-", 1)
@@ -356,4 +449,5 @@ def load_variables(loc, var_list=None, step=None):
     result = {}
     for tensor in var_list or ckpt.get_variable_to_shape_map():
         result[tensor] = ckpt.get_tensor(tensor)
+
     return result

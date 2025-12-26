@@ -7,7 +7,6 @@ from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
 
 import numpy as np
 import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
-from tensorflow_addons import image as tfi # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 import tree
 
 from hypertransformer.core import common_ht
@@ -118,14 +117,14 @@ def crop_and_resize(
                 extrapolation_value=extrapolation_value,
             )
         if squeeze:
-            r = r[0]
+            r = r[0] # type: ignore
         return r
 
     args = [images]
     if tree.is_nested(methods):
         args.append(methods)
     else:
-        resize_fn = functools.partial(resize_fn, resize_method=methods)
+        resize_fn = functools.partial(resize_fn, resize_method=methods) # type: ignore
     resize_fn = functools.partial(resize_fn, bboxes=bboxes)
     return tree.map_structure(resize_fn, *args)
 
@@ -193,7 +192,7 @@ def augment_images(
     )
 
 
-def get_dataset_info(dataset_name):
+def get_dataset_info(dataset_name: str):
     """Returns basic information about the dataset."""
     if dataset_name == "emnist":
         return DatasetInfo(
@@ -341,11 +340,11 @@ class AugmentationConfig:
         return (image - v_min) / (v_max - v_min + 1e-7)
 
     def _aug_contrast(self, image):
-        """Increses the image contrast."""
+        """Increases the image contrast."""
         normalized = image / 128.0 - 1
         v_mean = tf.reduce_mean(normalized, axis=(1, 2), keepdims=True)
         mult, shift = (ALPHA_MAX - ALPHA_MIN) / 2, (ALPHA_MAX + ALPHA_MIN) / 2
-        alpha = mult * self.alpha.value + shift
+        alpha = mult * self.alpha.value + shift # type: ignore
         output = tf.math.tanh((normalized - v_mean) * alpha) / alpha
         output += v_mean
         return 255.0 * self._normalize(output)
@@ -374,15 +373,129 @@ class AugmentationConfig:
     def _aug_resize(self, images):
         """Resizes the image."""
         size = int(images.shape[1])
-        re_size = size * (1 - MAX_RESIZE / 2 + MAX_RESIZE * self.size.value / 2)
+        re_size = size * (1 - MAX_RESIZE / 2 + MAX_RESIZE * self.size.value / 2) # type: ignore
         images = tf.image.resize(images, [re_size, re_size])
         return tf.image.resize_with_crop_or_pad(images, size, size)
 
     def _aug_rotate_90(self, images):
         num_rotations = tf.cast(
-            tf.math.floor(self.rotate_90_times.value + 2.0), tf.int32
+            tf.math.floor(self.rotate_90_times.value + 2.0), tf.int32 # type: ignore
         )
         return tf.image.rot90(images, k=num_rotations)
+
+    def _aug_rotate(self, images, angles, fill_value=0.):
+        """
+        images: Tensor, shape [B, H, W, C], dtype float32 (or castable)
+        angles: scalar Tensor (radians) or Tensor of shape [B], dtype float32
+        fill_value: scalar to use for pixels sampled outside source image
+
+        returns: rotated images, same shape as input
+        """
+        images = tf.cast(images, tf.float32)
+        shape = tf.shape(images)
+        batch = shape[0]
+        H = shape[1]
+        W = shape[2]
+        C = shape[3]
+
+        # Ensure angles is shape [B]
+        angles = tf.convert_to_tensor(angles, dtype=tf.float32)
+        angles = tf.reshape(angles, [-1])
+        angles = tf.cond(tf.equal(tf.size(angles), 1),
+                        lambda: tf.tile(angles, [batch]),
+                        lambda: angles)
+        angles = tf.reshape(angles, [batch])
+
+        # Grid of (x, y) coordinates in the output image
+        x_lin = tf.cast(tf.linspace(0.0, tf.cast(W, tf.float32) - 1.0, W), tf.float32)  # [W]
+        y_lin = tf.cast(tf.linspace(0.0, tf.cast(H, tf.float32) - 1.0, H), tf.float32)  # [H]
+        x_t, y_t = tf.meshgrid(x_lin, y_lin)  # [H, W]
+        x_flat = tf.reshape(x_t, [-1])  # [HW]
+        y_flat = tf.reshape(y_t, [-1])  # [HW]
+        HW = tf.shape(x_flat)[0]
+
+        # Coordinates relative to image center
+        cx = (tf.cast(W, tf.float32) - 1.0) / 2.0
+        cy = (tf.cast(H, tf.float32) - 1.0) / 2.0
+        x_rel = x_flat - cx  # [HW]
+        y_rel = y_flat - cy  # [HW]
+
+        # Above line is to satisfy graph shape inference; replace with tile:
+        x_rel = tf.tile(tf.expand_dims(x_rel, 0), [batch, 1])  # [B, HW]
+        y_rel = tf.tile(tf.expand_dims(y_rel, 0), [batch, 1])  # [B, HW]
+
+        # cos & sin per-batch, shape [B,1]
+        cos_a = tf.reshape(tf.cos(angles), [batch, 1])
+        sin_a = tf.reshape(tf.sin(angles), [batch, 1])
+
+        # Inverse mapping: source_coord = R_{-theta} * (out_coord - center) + center
+        # R_{-theta} = [[cos, sin], [-sin, cos]]
+        x_src = cos_a * x_rel + sin_a * y_rel + cx   # [B, HW]
+        y_src = -sin_a * x_rel + cos_a * y_rel + cy  # [B, HW]
+
+        # Bilinear interpolation
+        x0 = tf.floor(x_src)
+        x1 = x0 + 1.0
+        y0 = tf.floor(y_src)
+        y1 = y0 + 1.0
+
+        x0_safe = tf.cast(x0, tf.int32)
+        x1_safe = tf.cast(x1, tf.int32)
+        y0_safe = tf.cast(y0, tf.int32)
+        y1_safe = tf.cast(y1, tf.int32)
+
+        x0_clipped = tf.clip_by_value(x0_safe, 0, W - 1)
+        x1_clipped = tf.clip_by_value(x1_safe, 0, W - 1)
+        y0_clipped = tf.clip_by_value(y0_safe, 0, H - 1)
+        y1_clipped = tf.clip_by_value(y1_safe, 0, H - 1)
+
+        # Weights
+        wa = (x1 - x_src) * (y1 - y_src)  # top-left
+        wb = (x1 - x_src) * (x_src - x0)  # bottom-left
+        wc = (x_src - x0) * (y1 - y_src)  # top-right
+        wd = (x_src - x0) * (x_src - x0)  # bottom-right
+
+        # Correct bilinear weights: (x1 - x)*(y1 - y), (x1 - x)*(y - y0), (x - x0)*(y1 - y), (x - x0)*(y - y0)
+        wa = (x1 - x_src) * (y1 - y_src)
+        wb = (x1 - x_src) * (y_src - y0)
+        wc = (x_src - x0) * (y1 - y_src)
+        wd = (x_src - x0) * (y_src - y0)
+
+        # Build indices for gather_nd: shape [B*HW, 3] where each row is [b, y, x]
+        batch_idx = tf.reshape(tf.range(batch, dtype=tf.int32), [batch, 1])  # [B,1]
+        batch_idx = tf.tile(batch_idx, [1, HW])  # [B, HW]
+
+        def gather_at(x_inds, y_inds):
+            # x_inds, y_inds: [B, HW] int32
+            idx = tf.stack([tf.reshape(batch_idx, [-1]),
+                            tf.reshape(y_inds, [-1]),
+                            tf.reshape(x_inds, [-1])], axis=1)  # [B*HW, 3]
+            vals = tf.gather_nd(images, idx)  # [B*HW, C]
+            vals = tf.reshape(vals, [batch, HW, C])  # [B, HW, C]
+            return vals
+
+        Ia = gather_at(x0_clipped, y0_clipped)  # top-left
+        Ib = gather_at(x0_clipped, y1_clipped)  # bottom-left
+        Ic = gather_at(x1_clipped, y0_clipped)  # top-right
+        Id = gather_at(x1_clipped, y1_clipped)  # bottom-right
+
+        # Weights shapes: [B, HW] -> make [B, HW, 1]
+        wa = tf.expand_dims(wa, -1)
+        wb = tf.expand_dims(wb, -1)
+        wc = tf.expand_dims(wc, -1)
+        wd = tf.expand_dims(wd, -1)
+
+        out = wa * Ia + wb * Ib + wc * Ic + wd * Id  # [B, HW, C]
+
+        # Mask for points that were outside original image bounds (so we can fill with fill_value)
+        inside_x = tf.logical_and(x_src >= 0.0, x_src <= tf.cast(W, tf.float32) - 1.0)
+        inside_y = tf.logical_and(y_src >= 0.0, y_src <= tf.cast(H, tf.float32) - 1.0)
+        inside = tf.cast(tf.logical_and(inside_x, inside_y), tf.float32)  # [B, HW]
+        inside = tf.expand_dims(inside, -1)  # [B, HW, 1]
+
+        out = out * inside + fill_value * (1.0 - inside)
+        out = tf.reshape(out, [batch, H, W, C])
+        return out
 
     def process(self, images, index=None):
         """Processes a batch of samples."""
@@ -395,8 +508,8 @@ class AugmentationConfig:
             images = self._aug_rotate_90(images)
         if config.rotation_probability > 0.0:
             images = tf.cond(
-                self.rotate.value,
-                lambda: tfi.rotate(images, self.angle.value),
+                self.rotate.value, # radian
+                lambda: self._aug_rotate(images, self.angle.value),
                 lambda: tf.identity(images),
             )
         if config.roll_probability > 0.0:
@@ -439,21 +552,19 @@ class TaskGenerator:
     def __init__(
         self,
         data: Dict[Any, np.ndarray],
-        num_labels,
-        image_size,
+        num_labels: int,
         always_same_labels=False,
         use_label_subset=None,
     ):
         self.data = data
         self.num_labels = num_labels
-        self.image_size = (image_size, image_size)
         self.always_same_labels = always_same_labels
         if use_label_subset is not None:
             self.use_labels = use_label_subset
         else:
             self.use_labels = list(self.data.keys())
 
-    def _labels_per_batch(self, batch_size):
+    def _labels_per_batch(self, batch_size: int):
         samples_per_label = batch_size // self.num_labels
         labels_with_extra = batch_size % self.num_labels
         output = []
@@ -464,16 +575,18 @@ class TaskGenerator:
                 output.append(samples_per_label)
         return output
 
-    def sample_random_labels(self, labels, batch_size, same_labels=None):
+    def sample_random_labels(self, labels, batch_size: int, same_labels: Optional[bool]=None):
         """Generator producing random labels and corr. numbers of samples."""
         if same_labels is None:
             same_labels = self.always_same_labels
+
         if same_labels:
             chosen_labels = labels[: self.num_labels]
         else:
             chosen_labels = np.random.choice(
                 labels, size=self.num_labels, replace=False
             )
+
         samples_per_label = batch_size // self.num_labels
         labels_with_extra = batch_size % self.num_labels
         for i, label in enumerate(chosen_labels):
@@ -490,22 +603,22 @@ class TaskGenerator:
         """Produces labels and images from the label generator."""
         images, labels, classes = [], [], []
         consecutive_label = 0
-        for label, samples in label_generator():
+        for label, num_samples in label_generator():
             sample = self.data[label]
             chosen = np.random.choice(
-                range(sample.shape[0]), size=samples, replace=False
+                range(sample.shape[0]), size=num_samples, replace=False
             )
             images.append(sample[chosen, :, :])
-            chosen_labels = np.array([consecutive_label] * samples)
-            remove_label = [(i < unlabeled) for i in range(samples)]
+            chosen_labels = np.array([consecutive_label] * num_samples)
+            remove_label = [(i < unlabeled) for i in range(num_samples)]
             # This indicates that the sample does not have a label.
             chosen_labels[remove_label] = self.num_labels
-            classes.append(np.array([label] * samples))
+            classes.append(np.array([label] * num_samples))
             labels.append(chosen_labels)
             consecutive_label += 1
         return images, labels, classes
 
-    def _make_semisupervised_samples(self, batch_sizes, num_unlabeled_per_class):
+    def _make_semisupervised_samples(self, batch_sizes: list[int], num_unlabeled_per_class: list[int]):
         """Helper function for creating multiple semi-supervised samples."""
         output = []
         use_labels = self.use_labels
@@ -515,6 +628,7 @@ class TaskGenerator:
             # Copying to avoid changing the original list
             use_labels = use_labels[:] # type: ignore
             np.random.shuffle(use_labels)
+
         for batch_size, unlabeled in zip(batch_sizes, num_unlabeled_per_class):
             # Using the same labelset in all batches.
             label_generator = functools.partial(
@@ -524,7 +638,7 @@ class TaskGenerator:
 
         return output
 
-    def _make_semisupervised_batches(self, batch_sizes, num_unlabeled_per_class):
+    def _make_semisupervised_batches(self, batch_sizes: list[int], num_unlabeled_per_class: list[int]):
         """Creates batches of semi-supervised samples."""
         batches = self._make_semisupervised_samples(
             batch_sizes, num_unlabeled_per_class
@@ -536,7 +650,7 @@ class TaskGenerator:
             output.extend([class_mat.astype(np.int32) for class_mat in classes])
         return tuple(output)
 
-    def _make_supervised_batch(self, batch_size):
+    def _make_supervised_batch(self, batch_size: int):
         """Creates a batch of supervised samples."""
         batches = self._make_semisupervised_samples([batch_size], [0])
         images, labels, classes = batches[0]
@@ -547,10 +661,10 @@ class TaskGenerator:
 
     def get_batches(
         self,
-        batch_sizes,
+        batch_sizes: list[int],
         config: AugmentationConfig,
-        num_unlabeled_per_class,
-    ):
+        num_unlabeled_per_class: list[int],
+    ) -> list[tuple[Any, Any, Any]]:
         """Generator producing multiple separate balanced batches of data.
 
         Arguments:
@@ -567,7 +681,8 @@ class TaskGenerator:
             num_unlabeled_per_class=num_unlabeled_per_class,
             batch_sizes=batch_sizes,
         )
-        # Returned array is [images, ..., labels, ..., images, ..., labels, ...]
+        #                   [   |------------------------------------------batch 1--------------------------------|        , ...]
+        # Returned array is [image-1, ..., image-num_labels, label-1, ..., label-num_labels, class-1, ..., class-num_labels, ...]
         types = [tf.float32] * self.num_labels
         types += [tf.int32] * self.num_labels
         types += [tf.int32] * self.num_labels
@@ -615,7 +730,7 @@ class TaskGenerator:
             output.append((images, labels, classes))
         return output
 
-    def get_batch(self, batch_size, config: AugmentationConfig, num_unlabeled_per_class=0):
+    def get_batch(self, batch_size: int, config: AugmentationConfig, num_unlabeled_per_class=0) -> tuple[Any, Any, Any]:
         """Generator producing a single batch of data (meta-train + meta-test)."""
         if num_unlabeled_per_class > 0:
             raise ValueError(
@@ -645,14 +760,14 @@ class TaskGenerator:
 def make_numpy_data(
     sess,
     ds,
-    batch_size,
-    num_labels,
-    samples_per_label,
+    batch_size: int,
+    num_labels: int,
+    samples_per_label: int,
     image_key="image",
     label_key="label",
     transpose=True,
     max_batches=None,
-):
+) -> Dict[int, np.ndarray]:
     """Makes a label-to-samples dictionary from the TF dataset.
 
     Arguments:
@@ -674,6 +789,12 @@ def make_numpy_data(
     examples = {i: [] for i in range(num_labels)}
     batch_index = 0
     while True:
+        """
+        {
+            "image": np.ndarray [B, H, W, C],
+            "label": np.ndarray [B],
+        }
+        """
         value = sess.run(data)
         samples = value[label_key].shape[0]
         for index in range(samples):

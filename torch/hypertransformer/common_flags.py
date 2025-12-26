@@ -19,7 +19,7 @@ flags.DEFINE_integer("train_steps", 10000, "Number of training steps.")
 flags.DEFINE_string(
     "data_numpy_dir",
     "",
-    "Location of the NumPy dataset " "cache (can be useful for small datasets).",
+    "Location of the NumPy dataset cache (can be useful for small datasets).",
 )
 flags.DEFINE_string("data_dir", None, "Location of the cached tfds data.")
 flags.DEFINE_integer("num_labels", 4, "Number of labels to pick for each task.")
@@ -28,12 +28,12 @@ STRIDE = flags.DEFINE_integer("stride", 2, "Stride of the conv layers.")
 flags.DEFINE_integer("image_size", 28, "Image size.")
 flags.DEFINE_integer("num_sample_repeats", 1, "Number of repeats for each task.")
 flags.DEFINE_integer(
-    "steps_between_saves", 50000, "Number of steps between " "model saves."
+    "steps_between_saves", 50000, "Number of steps between model saves."
 )
 flags.DEFINE_string("cnn_model_name", "3-layer", "CNN model to train.")
 flags.DEFINE_integer("embedding_dim", 8, "Dimensionality of the embedding.")
 flags.DEFINE_integer(
-    "query_key_dim", 256, "Transformer key and query " "dimensionality."
+    "query_key_dim", 256, "Transformer key and query dimensionality."
 )
 flags.DEFINE_integer("value_dim", 256, "Transformer value dimensionality.")
 flags.DEFINE_integer("internal_dim", 512, "Transformer internal depth.")
@@ -54,23 +54,23 @@ flags.DEFINE_float("label_smoothing", 0.0, "Cross-entropy label smoothing.")
 flags.DEFINE_float(
     "rotation_probability",
     0.0,
-    "Probability of applying a " "random rotation to an image.",
+    "Probability of applying a random rotation to an image.",
 )
 flags.DEFINE_float(
-    "boundary_probability", 0.0, "Probability of extracting " "image boundary."
+    "boundary_probability", 0.0, "Probability of extracting image boundary."
 )
-flags.DEFINE_float("smooth_probability", 0.5, "Probability of smoothing an " "image.")
+flags.DEFINE_float("smooth_probability", 0.5, "Probability of smoothing an image.")
 flags.DEFINE_float(
-    "contrast_probability", 0.5, "Probability of increasing " "image contrast."
+    "contrast_probability", 0.5, "Probability of increasing image contrast."
 )
-flags.DEFINE_float("resize_probability", 0.0, "Probability of resizing an " "image.")
-flags.DEFINE_float("negate_probability", 0.0, "Probability of negating an " "image.")
+flags.DEFINE_float("resize_probability", 0.0, "Probability of resizing an image.")
+flags.DEFINE_float("negate_probability", 0.0, "Probability of negating an image.")
 flags.DEFINE_float("roll_probability", 0.0, "Probability of rolling the image.")
 flags.DEFINE_float("angle_range", 180.0, "Random angle variation.")
 flags.DEFINE_bool(
     "random_rotate_by_90",
     False,
-    "If set, the augmentation is a" "random rotation by 0, 90, 180, or 270 degrees.",
+    "If set, the augmentation is a random rotation by 0, 90, 180, or 270 degrees.",
 )
 flags.DEFINE_enum(
     "layerwise_generator",
@@ -113,14 +113,13 @@ flags.DEFINE_float(
 flags.DEFINE_bool(
     "lw_use_nonlinear_feature",
     False,
-    "Whether to use nonlinear " "features produced by the feature extractor.",
+    "Whether to use nonlinear features produced by the feature extractor.",
 )
-flags.DEFINE_string("train_dataset", "emnist", "Training dataset " "specification.")
+flags.DEFINE_string("train_dataset", "emnist", "Training dataset specification.")
 
 # Currently, both approaches seem to produce very similar results, but
 # 'output' weight allocation is more suitable for generating BN parameters
 # (currently supported only with this weight allocation scheme).
-
 flags.DEFINE_enum(
     "lw_weight_allocation",
     "spatial",
@@ -133,7 +132,7 @@ flags.DEFINE_enum(
 flags.DEFINE_bool(
     "lw_generate_bias",
     False,
-    "If set, convolutional layer " "biases are also generated.",
+    "If set, convolutional layer biases are also generated.",
 )
 
 flags.DEFINE_bool(
@@ -159,7 +158,7 @@ flags.DEFINE_bool(
 flags.DEFINE_bool(
     "add_trainable_weights",
     False,
-    "If set, trainable weights are added to the generated " "weights.",
+    "If set, trainable weights are added to the generated weights.",
 )
 
 flags.DEFINE_bool(
@@ -183,32 +182,32 @@ flags.DEFINE_integer(
     "labels like Omniglot.",
 )
 
-flags.DEFINE_string("test_dataset", "emnist:8-61", "Test dataset " "specification.")
+flags.DEFINE_string("test_dataset", "emnist:8-61", "Test dataset specification.")
 flags.DEFINE_float(
     "test_rotation_probability",
     -1,
-    "Probability of applying " "a random rotation to a test image.",
+    "Probability of applying a random rotation to a test image.",
 )
 flags.DEFINE_float(
-    "test_smooth_probability", -1, "Probability of smoothing " "a test image."
+    "test_smooth_probability", -1, "Probability of smoothing a test image."
 )
 flags.DEFINE_float(
-    "test_contrast_probability", -1, "Probability of " "increasing test image contrast."
+    "test_contrast_probability", -1, "Probability of increasing test image contrast."
 )
 flags.DEFINE_float(
-    "test_resize_probability", -1, "Probability of resizing " "a test image."
+    "test_resize_probability", -1, "Probability of resizing a test image."
 )
 flags.DEFINE_float(
-    "test_negate_probability", -1, "Probability of negating " "a test image."
+    "test_negate_probability", -1, "Probability of negating a test image."
 )
 flags.DEFINE_float(
-    "test_roll_probability", -1, "Probability of rolling a " "test image."
+    "test_roll_probability", -1, "Probability of rolling a test image."
 )
-flags.DEFINE_float("test_angle_range", -1, "Random angle variation for test " "images.")
+flags.DEFINE_float("test_angle_range", -1, "Random angle variation for test images.")
 flags.DEFINE_bool(
     "test_random_rotate_by_90",
     False,
-    "Random rotation by 0, " "90, 180, or 270 degrees for test images.",
+    "Random rotation by 0, 90, 180, or 270 degrees for test images.",
 )
 flags.DEFINE_bool(
     "test_per_label_augmentation",
@@ -251,13 +250,13 @@ flags.DEFINE_bool(
 flags.DEFINE_enum(
     "shared_feature_extractor",
     "none",
-    ["none", "2-layer", "3-layer", "4-layer"],
+    ["none", "2-layer", "3-layer", "4-layer", "2-layer-bn", "3-layer-bn"],
     "Shared feature extractor model.",
 )
 flags.DEFINE_integer(
     "shared_features_dim",
     32,
-    "Default number of channels in the shared feature " "extractor network.",
+    "Default number of channels in the shared feature extractor network.",
 )
 flags.DEFINE_bool(
     "separate_evaluation_bn_vars",
@@ -269,13 +268,13 @@ flags.DEFINE_enum(
     "shared_feature_extractor_padding",
     "valid",
     ["valid", "same"],
-    "Convolutional layer padding to use in " "the shared feature extractor.",
+    "Convolutional layer padding to use in the shared feature extractor.",
 )
 
 flags.DEFINE_bool(
     "apply_image_augmentations",
     False,
-    "If set, random typical image augmentation is applied to " "each image.",
+    "If set, random typical image augmentation is applied to each image.",
 )
 flags.DEFINE_integer(
     "default_num_channels", 16, "Default number of CNN channels for each layer."
@@ -284,7 +283,7 @@ flags.DEFINE_integer(
 flags.DEFINE_integer(
     "unlabeled_samples_per_class",
     0,
-    "Number of unlabeled samples per label in the training " "(or Transformer) batch.",
+    "Number of unlabeled samples per label in the training (or Transformer) batch.",
 )
 
 flags.DEFINE_integer(
@@ -304,10 +303,10 @@ flags.DEFINE_float(
 flags.DEFINE_float(
     "max_prob_remove_labeled",
     0.0,
-    "Maximum probability of randomly removing labeled " "samples from the support set.",
+    "Maximum probability of randomly removing labeled samples from the support set.",
 )
 
-flags.DEFINE_float("shared_fe_dropout", 0.0, "Shared feature extractor " "dropout.")
+flags.DEFINE_float("shared_fe_dropout", 0.0, "Shared feature extractor dropout.")
 flags.DEFINE_float("fe_dropout", 0.0, "Local feature extractor dropout.")
 
 flags.DEFINE_bool(
@@ -345,5 +344,5 @@ RESTORE_SHARED_FEATURES_FROM = flags.DEFINE_string(
 flags.DEFINE_string(
     "train_log_dir",
     "/tmp/experiment",
-    "Path for saving " "checkpoints and summaries to.",
+    "Path for saving checkpoints and summaries to.",
 )

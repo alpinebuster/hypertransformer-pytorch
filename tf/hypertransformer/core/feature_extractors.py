@@ -7,7 +7,6 @@ import typing_extensions
 
 import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 
-from hypertransformer.core import common_ht  # pylint:disable=unused-import
 from hypertransformer.core.common_ht import LayerwiseModelConfig
 
 Protocol = typing_extensions.Protocol

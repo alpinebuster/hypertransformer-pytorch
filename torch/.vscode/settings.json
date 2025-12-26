@@ -2,12 +2,16 @@
     "cSpell.words": [
         "absl",
         "avgpool",
+        "convs",
         "hypertransformer",
         "layerwise",
         "lrelu",
         "MAML",
         "maxpool",
         "miniimagenet",
-        "onnx"
+        "NCHW",
+        "NHWC",
+        "onnx",
+        "randn"
     ]
 }

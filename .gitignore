@@ -12,4 +12,4 @@ tieredimagenet
 *.zip
 *.log
 *.pkl
-test*.py
+test.py

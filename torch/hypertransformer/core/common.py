@@ -51,17 +51,17 @@ def get_default_saver():
 
 
 @dataclasses.dataclass
-class TrainState(object):
+class TrainState:
     """Model state."""
 
     train_op: tf.Tensor
     init_op: Optional[tf.Operation] = None
     step_initializer: Optional[tf.Operation] = None
     update_op: tf.Operation = field(default_factory=tf.no_op)
-    small_summaries: Union[List[Any], Dict[Text, List[Any]]] = field(
+    small_summaries: Union[List[Any], Dict[Text, List[Any]], None] = field(
         default_factory=list
     )
-    large_summaries: Union[List[Any], Dict[Text, List[Any]]] = field(
+    large_summaries: Union[List[Any], Dict[Text, List[Any]], None] = field(
         default_factory=list
     )
 
@@ -78,7 +78,7 @@ class TrainState(object):
     per_step_fn: Optional[Callable[[tf.Tensor, Any, Any], None]] = None
     checkpoint_suffix: str = "model"
 
-    def __post_init__(self, record_graph_in_summary):
+    def __post_init__(self, record_graph_in_summary: bool):
         if self.summary_writer is None:
             self.summary_writer = get_default_summary_writer(
                 dump_graph=record_graph_in_summary
@@ -86,7 +86,7 @@ class TrainState(object):
 
 
 @dataclasses.dataclass
-class OptimizerConfig(object):
+class OptimizerConfig:
     """Optimizer configuration."""
 
     learning_rate: float = 1e-3
@@ -118,10 +118,10 @@ def _is_not_empty(tensor):
         return True
     return (
         tensor is not None and len(tensor) > 0
-    ) # pylint: disable=g-explicit-length-test
+    )  # pylint: disable=g-explicit-length-test
 
 
-def train(train_config: TrainConfig, state: TrainState, run_options=None):
+def train(train_config: TrainConfig, state: TrainState, run_options=None) -> None:
     """Train loop."""
     sess = tf.get_default_session()
 
@@ -129,7 +129,7 @@ def train(train_config: TrainConfig, state: TrainState, run_options=None):
     first_step = step
     starting_time = time.time()
 
-    def save():
+    def _save():
         state.saver.save(
             sess,
             os.path.join(FLAGS.train_log_dir, state.checkpoint_suffix),
@@ -159,7 +159,7 @@ def train(train_config: TrainConfig, state: TrainState, run_options=None):
             train_config.steps_between_saves > 0
             and step % train_config.steps_between_saves == 0
         ):
-            save()
+            _save()
 
         if step % train_config.small_summaries_every == 0 and _is_not_empty(
             state.small_summaries
@@ -185,11 +185,12 @@ def train(train_config: TrainConfig, state: TrainState, run_options=None):
             state.summary_writer.add_summary(
                 util.normalize_tags(results["large"]), global_step=step
             )
+
     # Final save.
-    save()
+    _save()
 
 
-def init_training(state: TrainState):
+def init_training(state: TrainState) -> bool:
     """Initializes the training loop.
 
     Args:
@@ -200,10 +201,10 @@ def init_training(state: TrainState):
     """
     state.large_summaries = merge_summaries(
         state.large_summaries
-    )  # pytype: disable=annotation-type-mismatch
+    )
     state.small_summaries = merge_summaries(
         state.small_summaries
-    )  # pytype: disable=annotation-type-mismatch
+    )
     sess = tf.get_default_session()
     init_op = state.init_op
     if state.init_op is None:

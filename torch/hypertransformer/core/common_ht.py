@@ -4,9 +4,12 @@ import dataclasses
 import enum
 import functools
 
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
+
+if TYPE_CHECKING:
+    from hypertransformer.core.layerwise import GeneratedWeights
 
 
 @dataclasses.dataclass
@@ -22,10 +25,23 @@ class Model:
     def __init__(self):
         self.layer_outputs = {}
 
-    def train(self, inputs, labels):
+    def train(
+        self,
+        inputs,
+        labels,
+        mask: Optional[object] = None,
+        mask_random_samples: bool = False,
+        enable_fe_dropout: bool = False,
+        only_shared_feature: bool = False,
+    ):
         raise NotImplementedError
 
-    def evaluate(self, inputs, training=False):
+    def evaluate(
+        self,
+        inputs,
+        weight_blocks: "Optional[GeneratedWeights]" = None,
+        training: bool = False,
+    ):
         raise NotImplementedError
 
 
@@ -36,7 +52,7 @@ class DatasetConfig:
     # Dataset information
     dataset_name: str
     use_label_subset: Optional[List[int]] = None
-    tfds_split: str = "train"
+    ds_split: str = "train"
     meta_dataset_split: str = "train"
     data_dir: Optional[str] = None
     ds: Optional[tf.data.Dataset] = None
@@ -91,7 +107,52 @@ class ModelConfig:
 
 
 class WeightAllocation(enum.Enum):
-    """Type of the weight allocation by the Transformer."""
+    """Type of the weight allocation by the Transformer.
+        e.g. For a kernel with size: [k_H, k_W, C_in, C_out] -> [3, 3, 2, 4]
+
+        1. spatial
+          a) The Transformer outputs 9 embeddings (because of k_H*k_W -> 3*3):
+            E(0, 0), E(0, 1), ..., E(2, 2)
+          b) The length of each embedding is:
+            C_in * C_out = 2 * 4 = 8
+          c) Each embedding corresponds to:
+            E(i,j) → kernel[i, j, :, :]
+                |
+                V
+            kernel[0, 0, :, :] ← E(0, 0)
+            kernel[0, 1, :, :] ← E(0, 1)
+                ...
+            kernel[2, 2, :, :] ← E(2, 2)
+                |
+                V
+            ┌─────┬─────┬─────┐
+            │ E00 │ E01 │ E02 │
+            ├─────┼─────┼─────┤
+            │ E10 │ E11 │ E12 │
+            ├─────┼─────┼─────┤
+            │ E20 │ E21 │ E22 │
+            └─────┴─────┴─────┘
+
+        2. output
+          a) The Transformer outputs 4 embeddings (because C_out = 4)
+            E_0, E_1, E_2, E_3
+          b) The length of each embedding is:
+            length = k_H * k_W * C_in = 3 * 3 * 2 = 18
+          c) Each embedding corresponds to:
+            E_out → kernel[:, :, :, C_out]
+                |
+                V
+            kernel[:, :, :, 0] ← E_0
+            kernel[:, :, :, 1] ← E_1
+            kernel[:, :, :, 2] ← E_2
+            kernel[:, :, :, 3] ← E_3
+                |
+                V
+            Filter 0 ← E_0
+            Filter 1 ← E_1
+            Filter 2 ← E_2
+            Filter 3 ← E_3
+    """
 
     SPATIAL = 1
     OUTPUT_CHANNEL = 2

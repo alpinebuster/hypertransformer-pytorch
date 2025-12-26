@@ -1,20 +1,19 @@
 """Training binary."""
 
 import functools
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Optional
 
-from absl import app
-from absl import flags
+from absl import app, flags, logging
 
 import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 
-from hypertransformer import common_flags # pylint:disable=unused-import
-from hypertransformer import eval_model_flags # pylint:disable=unused-import
+from hypertransformer import common_flags
+from hypertransformer import eval_model_flags  # pylint:disable=unused-import
 
 from hypertransformer.core import common
 from hypertransformer.core import common_ht
 from hypertransformer.core import layerwise
-from hypertransformer.core import layerwise_defs # pylint:disable=unused-import
+from hypertransformer.core import layerwise_defs  # pylint:disable=unused-import
 from hypertransformer.core import train_lib
 from hypertransformer.core import util
 
@@ -106,7 +105,7 @@ def make_layerwise_model_config():
     )
 
 
-def make_optimizer(optim_config, global_step):
+def make_optimizer(optim_config: common.OptimizerConfig, global_step):
     learning_rate = tf.train.exponential_decay(
         optim_config.learning_rate,
         global_step,
@@ -133,7 +132,7 @@ def make_dataset_config(dataset_spec=""):
     return common_ht.DatasetConfig(
         dataset_name=dataset,
         use_label_subset=label_set,
-        tfds_split="train",
+        ds_split="train",
         data_dir=FLAGS.data_dir,
         rotation_probability=FLAGS.rotation_probability,
         smooth_probability=FLAGS.smooth_probability,
@@ -153,7 +152,7 @@ def make_dataset_config(dataset_spec=""):
     )
 
 
-def _default(new, default):
+def _default(new: float, default: float):
     return new if new >= 0 else default
 
 
@@ -166,7 +165,7 @@ def make_test_dataset_config(dataset_spec=""):
     return common_ht.DatasetConfig(
         dataset_name=dataset,
         use_label_subset=label_set,
-        tfds_split=FLAGS.test_split,
+        ds_split=FLAGS.test_split,
         data_dir=FLAGS.data_dir,
         rotation_probability=_default(
             FLAGS.test_rotation_probability, FLAGS.rotation_probability
@@ -230,7 +229,7 @@ def _make_warmup_loss(loss_heads, loss_prediction, global_step):
     return loss, weights
 
 
-def make_loss(labels, predictions, heads):
+def make_loss(labels, predictions, heads: list):
     """Makes a full loss including head 'warmup' losses."""
     losses = []
     for head in heads + [predictions]:
@@ -246,20 +245,27 @@ def make_loss(labels, predictions, heads):
     return loss, losses, wamup_weights
 
 
-def create_shared_head(shared_features, real_classes, real_class_min, real_class_max):
+def create_shared_head(
+    shared_features,
+    real_classes,
+    real_class_min: Optional[int],
+    real_class_max: Optional[int]
+):
     """Creates a real class prediction head from the shared feature."""
     if real_classes is None or shared_features is None:
         return None, None
     if real_class_min is None or real_class_max is None:
         tf.logging.warning(
             "Training classes boundaries are not provided. "
-            "Skippin shared head creation!"
+            "Skipping shared head creation!"
         )
         return None, None
+
     total_classes = real_class_max - real_class_min + 1
     with tf.variable_scope("shared_head", reuse=tf.AUTO_REUSE):
         fc = tf.layers.Dense(units=total_classes, name="fc")
         predictions = fc(shared_features)
+
     classes = real_classes - real_class_min
     one_hot_gt = tf.one_hot(classes, depth=total_classes)
     loss = tf.losses.softmax_cross_entropy(
@@ -269,46 +275,54 @@ def create_shared_head(shared_features, real_classes, real_class_min, real_class
     accuracy = tf.cast(tf.math.equal(classes, pred_classes), tf.float32)
     num_samples = tf.cast(tf.shape(shared_features)[0], tf.float32)
     accuracy = tf.reduce_sum(accuracy) / num_samples
+
     return loss, accuracy
 
 
 def create_layerwise_model(
-    model_config,
+    model_config: common_ht.LayerwiseModelConfig,
     dataset: common_ht.DatasetSamples,
     test_dataset: common_ht.DatasetSamples,
-    state,
-    optim_config,
+    state: train_lib.ModelState,
+    optim_config: common.OptimizerConfig,
 ):
     """Creates a hierarchical Transformer-CNN model."""
     tf.logging.info("Building the model")
     global_step = tf.train.get_or_create_global_step()
-    model = layerwise.build_model(
-        model_config.cnn_model_name, model_config=model_config
+    model_builder = layerwise.build_model(
+        model_config.cnn_model_name,
+        model_config=model_config,
     )
 
     with tf.variable_scope("model"):
-        weight_blocks = model.train(
+        weight_blocks = model_builder.train(
             dataset.transformer_images,
             dataset.transformer_labels,
             mask=dataset.transformer_masks,
             mask_random_samples=True,
             enable_fe_dropout=True,
         )
-        predictions = model.evaluate(
-            dataset.cnn_images, weight_blocks=weight_blocks, training=False
+        predictions = model_builder.evaluate(
+            dataset.cnn_images,
+            weight_blocks=weight_blocks,
+            training=False,
         )
+
         heads = []
         if model_config.train_heads:
-            outputs = model.layer_outputs.values()
+            outputs = model_builder.layer_outputs.values()
+            # layer_outputs[layer.name] => (inputs, head)
             heads = [output[1] for output in outputs if output[1] is not None]
 
-        test_weight_blocks = model.train(
+        test_weight_blocks = model_builder.train(
             test_dataset.transformer_images,
             test_dataset.transformer_labels,
             mask=test_dataset.transformer_masks,
         )
-        test_predictions = model.evaluate(
-            test_dataset.cnn_images, weight_blocks=test_weight_blocks, training=False
+        test_predictions = model_builder.evaluate(
+            test_dataset.cnn_images,
+            weight_blocks=test_weight_blocks,
+            training=False,
         )
 
     with tf.variable_scope("loss"):
@@ -365,7 +379,6 @@ def create_layerwise_model(
 
     for head_id, acc in enumerate(head_accs):
         summaries.append(tf.summary.scalar(f"accuracy/head-{head_id+1}", acc))
-
     for head_id, warmup_weight in enumerate(warmup_weights[:-1]):
         summaries.append(
             tf.summary.scalar(f"warmup_weights/head-{head_id+1}", warmup_weight)
@@ -373,15 +386,13 @@ def create_layerwise_model(
     if heads:
         summaries.append(tf.summary.scalar("warmup_weights/main", warmup_weights[-1]))
 
-    train_op = make_train_op(optimizer, state.loss)
-
     if shared_head_acc is not None and model_config.shared_head_weight > 0.0:
         summaries.append(
             tf.summary.scalar("accuracy/shared_head_accuracy", shared_head_acc)
         )
 
     return common.TrainState(
-        train_op=train_op,
+        train_op=make_train_op(optimizer, state.loss),
         step_initializer=tf.group(dataset.randomize_op, test_dataset.randomize_op),
         large_summaries=[],
         small_summaries=summaries
@@ -394,18 +405,24 @@ def create_layerwise_model(
 
 
 def create_shared_feature_model(
-    model_config, dataset, test_dataset, state, optim_config
+    model_config: common_ht.LayerwiseModelConfig,
+    dataset: common_ht.DatasetSamples,
+    test_dataset: common_ht.DatasetSamples,
+    state: train_lib.ModelState,
+    optim_config: common.OptimizerConfig,
 ):
     """Creates an image feature extractor model for pre-training."""
     del test_dataset
     tf.logging.info("Building the model")
+
     global_step = tf.train.get_or_create_global_step()
-    model = layerwise.build_model(
-        model_config.cnn_model_name, model_config=model_config
+    model_builder = layerwise.build_model(
+        model_config.cnn_model_name,
+        model_config=model_config,
     )
 
     with tf.variable_scope("model"):
-        weight_blocks = model.train(
+        weight_blocks = model_builder.train(
             dataset.transformer_images,
             dataset.transformer_labels,
             mask=dataset.transformer_masks,
@@ -425,10 +442,8 @@ def create_shared_feature_model(
         _, optimizer = make_optimizer(optim_config, global_step)
         state.loss = shared_head_loss
 
-    train_op = make_train_op(optimizer, state.loss)
-
     return common.TrainState(
-        train_op=train_op,
+        train_op=make_train_op(optimizer, state.loss),
         step_initializer=tf.group(dataset.randomize_op),
         large_summaries=[],
         small_summaries=[
@@ -480,9 +495,9 @@ def train(
     )
     args = {
         "dataset": dataset,
+        "test_dataset": test_dataset,
         "state": state,
         "optim_config": optimizer_config,
-        "test_dataset": test_dataset,
     }
 
     if common_flags.PRETRAIN_SHARED_FEATURE.value:
@@ -509,8 +524,9 @@ def main(argv):
     if len(argv) > 1:
         raise app.UsageError("Too many command-line arguments.")
 
-    tf.disable_eager_execution()
+    logging.info(f"\nFLAGS: {FLAGS.flag_values_dict()}\n")
 
+    tf.disable_eager_execution()
     for gpu in tf.config.list_physical_devices("GPU"):
         tf.config.experimental.set_memory_growth(gpu, True)
 
