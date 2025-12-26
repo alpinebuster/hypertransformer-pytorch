@@ -6,8 +6,9 @@ import os
 
 from typing import Callable, Optional
 
-import tensorflow as tf2
-import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 from hypertransformer.core import transformer
 

@@ -1,7 +1,9 @@
 """Tests for `train_lib.py`."""
 
 import numpy as np
-import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 from hypertransformer.core import common_ht as common
 from hypertransformer.core import train_lib

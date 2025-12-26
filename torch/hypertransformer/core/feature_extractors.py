@@ -24,10 +24,10 @@ class SimpleConvFeatureExtractor(FeatureExtractor):
     """Simple convolutional feature extractor.
 
     Extract and splice multi-layer features layer by layer, e.g.:
-      Input ([B, H, W, C])
-      ├─ Conv1 → GAP (Global Average Pooling) → f1 ([B, C])
-      ├─ Conv2 → GAP → f2 ([B, C])
-      ├─ Conv3 → GAP → f3 ([B, C])
+      Input ([B, C, H, W])
+      ├─ Conv1 → GAP (Global Average Pooling) → f1 ([B, feature_dim])
+      ├─ Conv2 → GAP → f2 ([B, feature_dim])
+      ├─ Conv3 → GAP → f3 ([B, feature_dim])
       |
       └─ concat(f1, f2, f3) ([B, [f1_1, ..., f1_C, f2_1, ..., f2_C, f3_1, ..., f3_C]])
     """
@@ -90,7 +90,12 @@ class SimpleConvFeatureExtractor(FeatureExtractor):
             # TensorFlow -> NHWC, `if int(tensor.shape[1]) < kernel_size: break``
             # PyTorch    -> NCHW, spatial dims are [-2], [-1]
             if tensor.shape[-2] < self.kernel_size or tensor.shape[-1] < self.kernel_size:
-                break
+                raise RuntimeError(
+                    f"{self.__class__.__name__} cannot apply Conv2d at layer {len(outputs)+1}: "
+                    f"spatial size {(tensor.shape[-2], tensor.shape[-1])} "
+                    f"is smaller than kernel_size={self.kernel_size}. "
+                    f"Check input_size, kernel_size, stride, or padding."
+                )
 
             tensor = conv(tensor)
             feature = tensor
@@ -117,7 +122,7 @@ class SharedMultilayerFeatureExtractor(FeatureExtractor):
     """Simple shared convolutional feature extractor.
 
     Just like a standard CNN, it only outputs the last layer of features, e.g.:
-      Input ([B, H, W, C_in])
+      Input ([B, C, H, W])
         ↓
       Conv1 ([B, H/2^(1-1), W/2^(1-1), feature_dim])
         ↓
@@ -135,42 +140,60 @@ class SharedMultilayerFeatureExtractor(FeatureExtractor):
         feature_layers: int,
         feature_dim: int, # Number of Conv2D filters
         name: str,
+        in_channels: int = 3,
         kernel_size: int = 3,
         padding: str = "valid",
         use_bn: bool = False,
     ):
         super().__init__(name=name)
 
-        self.feature_dim = feature_dim
-        self.convs = []
-        self.bns = []
-        self.kernel_size = kernel_size
-
+        # PyTorch 1.10+ supports "same" / "valid"
+        assert padding in ("same", "valid")
         assert feature_dim > 0
-        for idx, layer in enumerate(range(feature_layers)):
+
+        self.feature_dim = feature_dim
+        self.kernel_size = kernel_size
+        self.use_bn = use_bn
+
+        self.convs = nn.ModuleList()          
+        self.bns = nn.ModuleList()
+
+        for idx in range(feature_layers):
             # The first `feature_layers - 1` convolutional layers use a stride of 2 to progressively reduce the spatial dimensions, 
             # while the final layer uses a stride of `1` to extract features without additional downsampling.
             stride = 2 if idx < feature_layers - 1 else 1
             # BatchNorm relies on "channel consistency across samples", and LayerNorm depends on "overall stability of a single sample".
-            self.bns.append(tf.layers.BatchNormalization() if use_bn else None)
+            if use_bn:
+                self.bns.append(nn.BatchNorm2d(num_features=feature_dim))
+            else:
+                self.bns.append(nn.Identity())
+
             self.convs.append(
-                tf.layers.Conv2D(
-                    filters=feature_dim,
+                nn.Conv2d(
+                    in_channels=in_channels if idx == 0 else feature_dim,
+                    out_channels=feature_dim,
                     kernel_size=(self.kernel_size, self.kernel_size),
-                    strides=(stride, stride),
+                    stride=(stride, stride),
                     padding=padding,
-                    activation=tf.nn.relu,
-                    name=f"layer_{layer + 1}",
+                    bias=True,
                 )
             )
 
-    def __call__(self, input_tensor, training=True):
-        with tf.variable_scope(None, default_name=self.name):
-            tensor = input_tensor
-            for conv, bn in zip(self.convs, self.bns):
-                tensor = conv(tensor)
-                tensor = bn(tensor, training=training) if bn is not None else tensor
-            return tf.reduce_mean(tensor, axis=(-2, -3))
+        self.gap = nn.AdaptiveAvgPool2d(output_size=1)
+
+    def forward(self, x: torch.Tensor) -> Optional[torch.Tensor]:
+        tensor = x
+        for idx, (conv, bn) in enumerate(zip(self.convs, self.bns)):
+            if tensor.shape[-2] < self.kernel_size or tensor.shape[-1] < self.kernel_size:
+                raise RuntimeError(
+                    f"{self.__class__.__name__} cannot apply Conv2d at layer {idx+1}: "
+                    f"spatial size {(tensor.shape[-2], tensor.shape[-1])} "
+                    f"is smaller than kernel_size={self.kernel_size}. "
+                    f"Check input_size, kernel_size, stride, or padding."
+                )
+            tensor = conv(tensor)
+            tensor = bn(tensor)
+        return self.gap(tensor).flatten(1) 
 
 
 class PassthroughFeatureExtractor(FeatureExtractor):
@@ -178,26 +201,32 @@ class PassthroughFeatureExtractor(FeatureExtractor):
 
     No feature extraction is performed, only the input is expanded, e.g.
       Input
-      ├─ Flatten -> (size: [B, HWC])
-      └─ wrap_feature_extractor(Input) -> (size: [B, D])
-          ↓
-        concat -> (size: [B, HWC + D])
+      |  x -> [B, C, H, W]
+      ├─ Flatten -> [B, CHW]
+      ├───├─ wrap_feature_extractor(Input) -> [B, D]
+      |   |     ↓
+      |   ↓  concat -> [B, CHW + D]
+      └─ [B, CHW]
     """
 
     def __init__(self, name: str, wrap_class=None):
         super().__init__(name=name)
 
         self.name = name
+        self.wrap_feature_extractor: Optional[nn.Module] = None
         if wrap_class is not None:
+            # `wrap_class` must be a subclass of `nn.Module`
             self.wrap_feature_extractor = wrap_class(name=name)
         else:
             self.wrap_feature_extractor = None
 
-    def __call__(self, input_tensor):
-        output = tf.layers.Flatten()(input_tensor)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # [B, C, H, W] -> [B, C*H*W]
+        output = torch.flatten(x, start_dim=1)
         if self.wrap_feature_extractor is not None:
-            wrapped = self.wrap_feature_extractor(input_tensor)
-            output = tf.concat([output, wrapped], axis=-1)
+            wrapped = self.wrap_feature_extractor(x)
+            # [B, CHW + D]
+            output = torch.cat([output, wrapped], dim=-1)
         return output
 
 

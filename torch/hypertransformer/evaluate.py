@@ -7,9 +7,9 @@ from typing import Dict
 
 from absl import app, flags, logging
 import numpy as np
-import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
-
-import tf_slim
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 from hypertransformer import common_flags
 from hypertransformer import eval_model_flags  # pylint:disable=unused-import

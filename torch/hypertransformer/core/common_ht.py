@@ -7,6 +7,9 @@ import functools
 from typing import TYPE_CHECKING, List, Optional
 
 import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 if TYPE_CHECKING:
     from hypertransformer.core.layerwise import GeneratedWeights

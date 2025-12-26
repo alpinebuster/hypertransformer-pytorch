@@ -6,7 +6,9 @@ import functools
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
 
 import numpy as np
-import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import tree
 
 from hypertransformer.core import common_ht

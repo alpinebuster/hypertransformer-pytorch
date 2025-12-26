@@ -4,7 +4,9 @@ import dataclasses
 
 from typing import Optional, Tuple, Callable
 
-import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 LARGE_NUMBER = 1e8
 

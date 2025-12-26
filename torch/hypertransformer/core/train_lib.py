@@ -8,8 +8,9 @@ import random
 from typing import Any, Dict, Optional
 
 import numpy as np
-import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
-import tensorflow_datasets as tfds
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 from hypertransformer.core import common_ht
 from hypertransformer.core.common_ht import LayerwiseModelConfig, DatasetConfig
