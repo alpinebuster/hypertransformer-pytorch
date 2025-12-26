@@ -181,11 +181,11 @@ class MultiHeadAttention(tf.Module):
             # K = X_k × W_K → [B, T_k, D_qk], W_K ∈ ℝ[D_model × D_qk]
             # V = X_v × W_V → [B, T_v, D_v],  W_V ∈ ℝ[D_model × D_v]
             q, k, v = self.w_q(q), self.w_k(k), self.w_v(v)
-            # [B, T_q, H, d_qk]
+            # [B, H, T_q, d_qk]
             q = self._split_heads(q, batch_size, self.qk_depth)
-            # [B, T_q, H, d_qk]
+            # [B, H, T_q, d_qk]
             k = self._split_heads(k, batch_size, self.qk_depth)
-            # [B, T_v, H, d_v]
+            # [B, H, T_v, d_v]
             v = self._split_heads(v, batch_size, self.v_depth)
             # [B, H, T_q, d_v]
             scaled_attention, attention_weights = attention(

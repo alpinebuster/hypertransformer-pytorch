@@ -9,7 +9,7 @@ print("\nTORCH VERSION IN TEST:", torch.__version__)
 
 
 # ------------------------------------------------------------
-#   SimpleConvFeatureExtractor Tests
+#   Class `SimpleConvFeatureExtractor` Tests
 # ------------------------------------------------------------
 
 
@@ -59,7 +59,7 @@ def test_simple_multi_layer_padding(padding, feature_layers):
 
 
 # ------------------------------------------------------------
-#   SharedMultilayerFeatureExtractor Tests
+#   Class `SharedMultilayerFeatureExtractor` Tests
 # ------------------------------------------------------------
 
 
@@ -106,7 +106,7 @@ def test_shared_multi_layer_padding(padding, feature_layers):
 
 
 # ------------------------------------------------------------
-#   PassthroughFeatureExtractor Tests
+#   Class `PassthroughFeatureExtractor` Tests
 # ------------------------------------------------------------
 
 

@@ -3,7 +3,6 @@
 import functools
 
 from typing import cast, Optional
-import typing_extensions
 
 import torch
 import torch.nn as nn
@@ -11,8 +10,6 @@ import torch.nn.functional as F
 
 from hypertransformer.core.common_ht import LayerwiseModelConfig
 from hypertransformer.core.util import same_pad_2d
-
-Protocol = typing_extensions.Protocol
 
 
 class FeatureExtractor(nn.Module):

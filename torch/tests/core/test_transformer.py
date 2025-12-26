@@ -1,87 +1,483 @@
 """Tests for `transformer.py`."""
 
-import numpy as np
+import pytest
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 
-from hypertransformer.core import transformer
-
-
-def _make_qkv_1():
-    """Creates a specific query/key/value example."""
-    v1 = np.array([1.0, 2.0, 3.0])
-    v2 = np.array([5.0, 6.0, 7.0])
-    q = tf.constant([[1.0, 0.0], [0.0, 1.0]], dtype=tf.float32)
-    k = tf.constant([[0.0, 2.0], [15.0, 2.0]], dtype=tf.float32)
-    # (1.0, 0.0) gives zero for k[0] and 15.0 for k[1] => choosing v2
-    # (0.0, 1.0) gives 2.0 for both => choosing (v1 + v2) / 2
-    v = tf.constant(np.stack([v1, v2]), dtype=tf.float32)
-    return q, k, v, v1, v2
+from hypertransformer.core.transformer import attention, PWFeedForward, \
+    MultiHeadAttention, TransformerParams, \
+    EncoderDecoderModel, EncoderModel, SeparateEncoderDecoderModel, \
+    EncoderLayer, DecoderLayer
 
 
-def _make_qkv_2():
-    """Creates a larger query/key/value example for shape evaluation."""
-    v1 = np.array([1.0, 2.0, 3.0])
-    v2 = np.array([5.0, 6.0, 7.0])
-    q = tf.constant([[[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]]], dtype=tf.float32)
-    k = tf.constant([[[0.0, 2.0, 0.0, 2.0], [15.0, 2.0, 15.0, 2.0]]], dtype=tf.float32)
-    v = tf.constant(np.stack([[v1, v2]]), dtype=tf.float32)
-    return q, k, v, v1, v2
+# ------------------------------------------------------------
+#   Function `attention` Tests
+# ------------------------------------------------------------
 
 
-class TransformerTest(tf.test.TestCase):
+@pytest.mark.parametrize(
+    "B,H,S_q,S_k,d_qk,d_v",
+    [
+        (1, 1, 1, 1, 4, 4),
+        (2, 4, 3, 5, 8, 6),
+        (4, 8, 7, 7, 16, 8),
+    ],
+)
+def test_attention_func(B, H, S_q, S_k, d_qk, d_v):
+    q = torch.randn(B, H, S_q, d_qk)
+    k = torch.randn(B, H, S_k, d_qk)
+    v = torch.randn(B, H, S_k, d_v)
 
-    def test_attention(self):
-        """Tests attention operation outputs on fixed examples."""
-        q, k, v, v1, v2 = _make_qkv_1()
-        result = transformer.attention(q, k, v, mask=None)
-        with self.session() as sess:
-            sess.run(tf.global_variables_initializer())
-            output, _ = sess.run(result)
-            self.assertAllClose(output[0], v2, rtol=1e-3)
-            self.assertAllClose(output[1], (v1 + v2) / 2)
+    context, attn = attention(q, k, v)
 
-    def test_mha(self):
-        """Verifies multi-headed attention layer output shapes."""
-        params = transformer.TransformerParams(
-            mha_output_dim=4, heads=2, num_layers=1, query_key_dim=2, internal_dim=2
-        )
-        mha = transformer.MultiHeadAttention(params)
-        q, k, v, _, _ = _make_qkv_2()
-        output, attn_weights = mha(q, k, v)
-        self.assertEqual(output.shape, (1, 2, 4))
-        self.assertEqual(attn_weights.shape, (1, 2, 2, 2))
-
-    def _make_encoder(self):
-        """Creates an encoder layer."""
-        params = transformer.TransformerParams(
-            mha_output_dim=512,
-            heads=8,
-            internal_dim=1024,
-            num_layers=1,
-            query_key_dim=128,
-        )
-        sample_encoder_layer = transformer.EncoderLayer(params)
-        return (
-            sample_encoder_layer(tf.random.uniform((64, 43, 512)), False, None),
-            params,
-        )
-
-    def test_encoder(self):
-        """Verifies encoder layer output shapes."""
-        self.assertEqual(self._make_encoder()[0].shape, (64, 43, 512))
-
-    def test_decoder(self):
-        """Verifies decoder layer output shapes."""
-        encoder_output, params = self._make_encoder()
-        decoder_layer = transformer.DecoderLayer(params, name="decoder")
-        decoder_output, _, _ = decoder_layer(
-            tf.random.uniform((64, 50, 512)), encoder_output, False
-        )
-        self.assertEqual(decoder_output.shape, (64, 50, 512))
+    assert context.shape == (B, H, S_q, d_v)
+    assert attn.shape == (B, H, S_q, S_k)
 
 
-if __name__ == "__main__":
-    tf.disable_eager_execution()
-    tf.test.main()
+# ------------------------------------------------------------
+#   Class `PWFeedForward` Tests
+# ------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "batch_size,seq_len,input_dim,internal_dim,output_dim",
+    [
+        (2, 4, 16, 32, 16),
+        (1, 8, 32, 64, 32),
+        (4, 1, 64, 128, 64),
+        (2, 10, 128, 256, 128),
+    ],
+)
+@pytest.mark.parametrize(
+    "activation",
+    [torch.relu, None],
+)
+def test_pwfeedforward(
+    batch_size,
+    seq_len,
+    input_dim,
+    internal_dim,
+    output_dim,
+    activation,
+):
+    model = PWFeedForward(
+        output_dim=output_dim,
+        internal_dim=internal_dim,
+        activation=activation,
+    )
+
+    x = torch.randn(batch_size, seq_len, input_dim)
+    y: torch.Tensor = model(x)
+
+    assert y.shape == (batch_size, seq_len, output_dim)
+
+
+# ------------------------------------------------------------
+#   Class `MultiHeadAttention` Tests
+# ------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "batch_size,s_q,s_k,d_qk,d_v,heads",
+    [
+        (2, 4, 4, 32, 32, 1),    # Sinle head self-attention
+        (2, 8, 8, 64, 64, 4),    # Multi heads self-attention
+        (1, 5, 7, 128, 128, 8), # Multi heads cross-attention
+    ],
+)
+@pytest.mark.parametrize(
+    "use_mask",
+    [True, False],
+)
+@pytest.mark.parametrize(
+    "d_model, mha_output_dim",
+    [
+        (128, 128),
+        (256, 256),
+        (512, 512),
+    ],
+)
+def test_multi_head_attention_shapes(
+    batch_size,
+    s_q,
+    s_k,
+    d_qk,
+    d_v,
+    heads,
+    use_mask,
+    d_model,
+    mha_output_dim,
+):
+    x_q = torch.randn(batch_size, s_q, d_model)
+    x_k = torch.randn(batch_size, s_k, d_model)
+    x_v = torch.randn(batch_size, s_k, d_model)
+
+    if use_mask:
+        # shape: [B, 1, 1, S_k] -> [B, H, S_q, S_k]
+        # The two 1s in the middle are for broadcasting
+        mask = torch.ones(batch_size, 1, 1, s_k)
+        mask[:, :, :, -1] = 0  # Mask out the last token
+    else:
+        mask = None
+
+    params = TransformerParams(
+        query_key_dim=d_qk,
+        value_dim=d_v,
+        internal_dim=128,
+        num_layers=1,
+        mha_output_dim=mha_output_dim,
+        heads=heads,
+    )
+
+    mha = MultiHeadAttention(params=params)
+
+    output: torch.Tensor
+    attn_weights: torch.Tensor
+    output, attn_weights = mha(x_v, x_k, x_q, mask)
+
+    assert output.shape == (batch_size, s_q, params.mha_output_dim)
+    assert attn_weights.shape == (batch_size, heads, s_q, s_k)
+
+
+# ------------------------------------------------------------
+#   Class `EncoderLayer` Tests
+# ------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "query_key_dim,value_dim,num_layers,heads,internal_dim",
+    [
+        (128,  64, 1, 4, 1024), # params.internal_dim > 0  -> Has FFN
+        (256, 128, 2, 8, 0),    # params.internal_dim <= 0 -> NO FFN
+    ],
+)
+@pytest.mark.parametrize(
+    "batch_size,seq_len",
+    [
+        (2, 43),
+        (1, 82),
+    ],
+)
+@pytest.mark.parametrize(
+    "d_model, mha_output_dim",
+    [
+        (128, 128),
+        (256, 256),
+        (512, 512),
+    ],
+)
+def test_encoder_layer(
+    query_key_dim: int,
+    value_dim: int,
+    num_layers: int,
+    heads: int,
+    internal_dim: int,
+    batch_size: int,
+    seq_len: int,
+    d_model: int,
+    mha_output_dim: int,
+):
+    torch.manual_seed(0)
+
+    params = TransformerParams(
+        query_key_dim=query_key_dim,
+        value_dim=value_dim,
+        mha_output_dim=mha_output_dim,
+        internal_dim=internal_dim,
+        num_layers=num_layers,
+        heads=heads,
+        dropout_rate=0.1,
+    )
+    x = torch.randn(batch_size, seq_len, d_model)
+    # mask: [B, 1, 1, S]（broadcastable）
+    mask = torch.ones(batch_size, 1, 1, seq_len)
+
+    assert params.mha_output_dim is not None
+    layer = EncoderLayer(params=params)
+    output = layer(x, mask=mask)
+
+    # ---------- Assertions ----------
+    assert isinstance(output, torch.Tensor)
+    assert output.shape == (batch_size, seq_len, params.mha_output_dim)
+
+    # Attention weights should exist
+    assert hasattr(layer, "attention_weights")
+    attn: torch.Tensor = layer.attention_weights
+    assert attn.shape == (batch_size, heads, seq_len, seq_len)
+
+
+# ------------------------------------------------------------
+#   Class `DecoderLayer` Tests
+# ------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "query_key_dim,value_dim,num_layers,heads,internal_dim",
+    [
+        (128,  64, 1, 4, 1024), # params.internal_dim > 0  -> Has FFN
+        (256, 128, 2, 8, 0),    # params.internal_dim <= 0 -> NO FFN
+    ],
+)
+@pytest.mark.parametrize(
+    "batch_size,seq_len",
+    [
+        (2, 43),
+        (1, 82),
+    ],
+)
+@pytest.mark.parametrize(
+    "d_model, mha_output_dim",
+    [
+        (128, 128),
+        (256, 256),
+        (512, 512),
+    ],
+)
+def test_decoder_layer(
+    query_key_dim: int,
+    value_dim: int,
+    num_layers: int,
+    heads: int,
+    internal_dim: int,
+    batch_size: int,
+    seq_len: int,
+    d_model: int,
+    mha_output_dim: int,
+):
+    torch.manual_seed(0)
+
+    params = TransformerParams(
+        query_key_dim=query_key_dim,
+        value_dim=value_dim,
+        mha_output_dim=mha_output_dim,
+        internal_dim=internal_dim,
+        num_layers=num_layers,
+        heads=heads,
+        dropout_rate=0.1,
+    )
+    # target sequence (decoder input)
+    # D_mha_out = d_model
+    x = torch.randn(batch_size, seq_len, d_model)
+    # encoder output -> [B, S_q, D_mha_out]
+    enc_output = torch.randn(batch_size, seq_len, d_model)
+
+    # look-ahead mask: [B, 1, S, S]
+    look_ahead_mask = torch.tril(
+        torch.ones(seq_len, seq_len)
+    ).unsqueeze(0).unsqueeze(1)
+    look_ahead_mask = look_ahead_mask.expand(batch_size, 1, seq_len, seq_len)
+    # padding mask: [B, 1, 1, S]
+    padding_mask = torch.ones(batch_size, 1, 1, seq_len)
+
+    layer = DecoderLayer(params)
+    out: torch.Tensor
+    attn_w1: torch.Tensor
+    attn_w2: torch.Tensor
+    out, attn_w1, attn_w2 = layer(
+        x,
+        enc_output,
+        look_ahead_mask=look_ahead_mask,
+        padding_mask=padding_mask,
+    )
+
+    # ---------- Assertions ----------
+    assert isinstance(out, torch.Tensor)
+    assert out.shape == (batch_size, seq_len, d_model)
+
+    # self-attention weights
+    assert attn_w1.shape == (batch_size, heads, seq_len, seq_len)
+
+    # cross-attention weights
+    assert attn_w2.shape == (batch_size, heads, seq_len, seq_len)
+
+
+# ------------------------------------------------------------
+#   Class `EncoderDecoderModel` Tests
+# ------------------------------------------------------------
+@pytest.fixture
+def transformer_params():
+    return TransformerParams(
+        mha_output_dim=512,
+        query_key_dim=32,
+        value_dim=32,
+        internal_dim=1024,
+        num_layers=2,
+        heads=8,
+    )
+
+@pytest.mark.parametrize(
+    "query_key_dim,value_dim,num_layers,heads,internal_dim",
+    [
+        (128,  64, 1, 4, 1024), # params.internal_dim > 0  -> Has FFN
+        (256, 128, 2, 8, 0),    # params.internal_dim <= 0 -> NO FFN
+    ],
+)
+@pytest.mark.parametrize(
+    "batch_size, seq_len, hidden_dim, mha_output_dim",
+    [
+        (2, 8, 64, 64), # [batch_size, seq_len, hidden_dim] ← Normal conditions
+        (None, 8, 128, 128), # [seq_len, hidden_dim]             ← NO batch dimension
+    ],
+)
+def test_encoderdecodermodel(
+    query_key_dim: int,
+    value_dim: int,
+    num_layers: int,
+    heads: int,
+    internal_dim: int,
+    batch_size: int,
+    seq_len: int,
+    hidden_dim: int,
+    mha_output_dim: int,
+):
+    torch.manual_seed(0)
+
+    params = TransformerParams(
+        query_key_dim=query_key_dim,
+        value_dim=value_dim,
+        mha_output_dim=mha_output_dim,
+        internal_dim=internal_dim,
+        num_layers=num_layers,
+        heads=heads,
+        dropout_rate=0.1,
+    )
+
+    if batch_size is None:
+        x = torch.randn(seq_len, hidden_dim)
+        expected_shape = (seq_len, hidden_dim)
+    else:
+        x = torch.randn(batch_size, seq_len, hidden_dim)
+        expected_shape = (batch_size, seq_len, hidden_dim)
+
+    model = EncoderDecoderModel(params)
+    model.eval()
+    out: torch.Tensor = model(x)
+
+    assert out.shape == expected_shape
+    assert not torch.isnan(out).any()
+
+
+# ------------------------------------------------------------
+#   Class `EncoderModel` Tests
+# ------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "query_key_dim,value_dim,num_layers,heads,internal_dim",
+    [
+        (128,  64, 1, 4, 1024), # params.internal_dim > 0  -> Has FFN
+        (256, 128, 2, 8, 0),    # params.internal_dim <= 0 -> NO FFN
+    ],
+)
+@pytest.mark.parametrize(
+    "batch_size, seq_len, hidden_dim, mha_output_dim",
+    [
+        (2, 8, 64, 64), # [batch_size, seq_len, hidden_dim] ← Normal conditions
+        (None, 8, 128, 128), # [seq_len, hidden_dim]             ← NO batch dimension
+    ],
+)
+def test_encodermodel(
+    query_key_dim: int,
+    value_dim: int,
+    num_layers: int,
+    heads: int,
+    internal_dim: int,
+    batch_size: int,
+    seq_len: int,
+    hidden_dim: int,
+    mha_output_dim: int,
+):
+    torch.manual_seed(0)
+
+    params = TransformerParams(
+        query_key_dim=query_key_dim,
+        value_dim=value_dim,
+        mha_output_dim=mha_output_dim,
+        internal_dim=internal_dim,
+        num_layers=num_layers,
+        heads=heads,
+        dropout_rate=0.1,
+    )
+
+    if batch_size is None:
+        x = torch.randn(seq_len, hidden_dim)
+        expected_shape = (seq_len, hidden_dim)
+    else:
+        x = torch.randn(batch_size, seq_len, hidden_dim)
+        expected_shape = (batch_size, seq_len, hidden_dim)
+
+    model = EncoderModel(params)
+    model.eval()
+    out: torch.Tensor = model(x)
+
+    assert out.shape == expected_shape
+    assert not torch.isnan(out).any()
+
+
+# ------------------------------------------------------------
+#   Class `SeparateEncoderDecoderModel` Tests
+# ------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "query_key_dim,value_dim,num_layers,heads,internal_dim",
+    [
+        (128,  64, 1, 4, 1024), # params.internal_dim > 0  -> Has FFN
+        (256, 128, 2, 8, 0),    # params.internal_dim <= 0 -> NO FFN
+    ],
+)
+@pytest.mark.parametrize(
+    "batch_size, seq_len, hidden_dim, mha_output_dim",
+    [
+        (2, 8, 64, 64), # [batch_size, seq_len, hidden_dim] ← Normal conditions
+        (None, 8, 128, 128), # [seq_len, hidden_dim]             ← NO batch dimension
+    ],
+)
+def test_separateencoderdecoder_model(
+    query_key_dim: int,
+    value_dim: int,
+    num_layers: int,
+    heads: int,
+    internal_dim: int,
+    batch_size: int,
+    seq_len: int,
+    hidden_dim: int,
+    mha_output_dim: int,
+):
+    torch.manual_seed(0)
+
+    encoder_params = TransformerParams(
+        query_key_dim=query_key_dim,
+        value_dim=value_dim,
+        mha_output_dim=mha_output_dim,
+        internal_dim=internal_dim,
+        num_layers=num_layers,
+        heads=heads,
+        dropout_rate=0.1,
+    )
+    decoder_params = TransformerParams(
+        query_key_dim=query_key_dim,
+        value_dim=value_dim,
+        mha_output_dim=mha_output_dim,
+        internal_dim=internal_dim,
+        num_layers=num_layers,
+        heads=heads,
+        dropout_rate=0.1,
+    )
+
+    if batch_size is None:
+        x = torch.randn(seq_len, hidden_dim)
+        weight_sequence = torch.randn(seq_len*2, hidden_dim)
+        expected_shape = (seq_len*2, hidden_dim)
+    else:
+        x = torch.randn(batch_size, seq_len, hidden_dim)
+        weight_sequence = torch.randn(batch_size, seq_len*2, hidden_dim)
+        expected_shape = (batch_size, seq_len*2, hidden_dim)
+
+    model = SeparateEncoderDecoderModel(
+        encoder_params=encoder_params,
+        decoder_params=decoder_params,
+    )
+    output = model(x, weight_sequence)
+
+    assert isinstance(output, torch.Tensor)
+    assert output.shape == expected_shape
