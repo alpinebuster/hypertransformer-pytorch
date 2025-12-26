@@ -2,10 +2,12 @@
 
 import functools
 import glob
+import math
 import os
 
 from typing import Callable, Optional
 
+import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -452,3 +454,70 @@ def load_variables(loc: str, var_list=None, step=None):
         result[tensor] = ckpt.get_tensor(tensor)
 
     return result
+
+
+def same_pad_2d(
+    x: torch.Tensor,
+    kernel_size: int | tuple[int, int],
+    stride: int | tuple[int, int],
+    dilation: int | tuple[int, int] = 1,
+) -> torch.Tensor:
+    """
+    TensorFlow-style SAME padding for 2D convolution.
+    Supports stride > 1.
+
+    Args:
+       x -> [B, C, H, W]
+    """
+
+    if isinstance(kernel_size, int):
+        kh, kw = kernel_size, kernel_size
+    else:
+        kh, kw = kernel_size
+
+    if isinstance(stride, int):
+        sh, sw = stride, stride
+    else:
+        sh, sw = stride
+
+    if isinstance(dilation, int):
+        dh, dw = dilation, dilation
+    else:
+        dh, dw = dilation
+
+    _, _, h, w = x.shape
+
+    # Effective kernel size after dilation
+    # e.g. kernel_size = 3
+    #  dilation=1 -> ● ● ●
+    #  dilation=2 -> ● _ ● _ ●
+    #       ↓
+    #  Effective Size = 5
+    kh_eff = (kh - 1) * dh + 1
+    kw_eff = (kw - 1) * dw + 1
+
+    # The goal of SAME padding
+    out_h = math.ceil(h / sh)
+    out_w = math.ceil(w / sw)
+
+    # Target: out = ceil(in / stride)
+    #             ↓
+    # Actual: out = floor((in + pad_left + pad_right − effective_kernel) / stride) + 1
+    #             ↓
+    #     Why can "floor" be ignored? Because: 
+    #       The design goal of SAME padding is "padding large enough to ensure that the output is at least `ceil(in/stride)`". 
+    #       A little more padding will not affect the output size.
+    #     out − 1 = (in + pad_total − effective_kernel) / stride, (pad_total = pad_left + pad_right)
+    #             ↓
+    # (in + pad_total − effective_kernel) = (out − 1) × stride
+    #             ↓
+    #         pad = (out - 1) * stride + effective_kernel - in
+    pad_h = max((out_h - 1) * sh + kh_eff - h, 0)
+    pad_w = max((out_w - 1) * sw + kw_eff - w, 0)
+
+    pad_top = pad_h // 2
+    pad_bottom = pad_h - pad_top
+    pad_left = pad_w // 2
+    pad_right = pad_w - pad_left
+
+    return F.pad(x, (pad_left, pad_right, pad_top, pad_bottom))

@@ -2,7 +2,7 @@
 
 import functools
 
-from typing import Optional
+from typing import cast, Optional
 import typing_extensions
 
 import torch
@@ -10,6 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from hypertransformer.core.common_ht import LayerwiseModelConfig
+from hypertransformer.core.util import same_pad_2d
 
 Protocol = typing_extensions.Protocol
 
@@ -53,7 +54,7 @@ class SimpleConvFeatureExtractor(FeatureExtractor):
         assert input_size is not None
         assert feature_dim > 0
 
-        # Stride logic (same as TF)
+        # Stride logic (same as TF implementation)
         def_stride = 2
         if input_size < kernel_size:
             self.kernel_size = input_size
@@ -61,6 +62,7 @@ class SimpleConvFeatureExtractor(FeatureExtractor):
 
         # PyTorch 1.10+ supports "same" / "valid"
         assert padding in ("same", "valid")
+        self.padding = padding
         self.convs = nn.ModuleList()
 
         for idx in range(feature_layers):
@@ -73,7 +75,7 @@ class SimpleConvFeatureExtractor(FeatureExtractor):
                     out_channels=feature_dim,
                     kernel_size=(self.kernel_size, self.kernel_size),
                     stride=(stride, stride),
-                    padding=padding,
+                    padding=0,
                     bias=True,
                 )
             )
@@ -95,6 +97,14 @@ class SimpleConvFeatureExtractor(FeatureExtractor):
                     f"spatial size {(tensor.shape[-2], tensor.shape[-1])} "
                     f"is smaller than kernel_size={self.kernel_size}. "
                     f"Check input_size, kernel_size, stride, or padding."
+                )
+
+            if self.padding == "same":
+                tensor = same_pad_2d(
+                    tensor,
+                    kernel_size=self.kernel_size,
+                    stride=cast(tuple[int, int], conv.stride),
+                    dilation=cast(tuple[int, int], conv.dilation),
                 )
 
             tensor = conv(tensor)
@@ -149,6 +159,7 @@ class SharedMultilayerFeatureExtractor(FeatureExtractor):
 
         # PyTorch 1.10+ supports "same" / "valid"
         assert padding in ("same", "valid")
+        self.padding = padding
         assert feature_dim > 0
 
         self.feature_dim = feature_dim
@@ -174,7 +185,7 @@ class SharedMultilayerFeatureExtractor(FeatureExtractor):
                     out_channels=feature_dim,
                     kernel_size=(self.kernel_size, self.kernel_size),
                     stride=(stride, stride),
-                    padding=padding,
+                    padding=0,
                     bias=True,
                 )
             )
@@ -191,6 +202,15 @@ class SharedMultilayerFeatureExtractor(FeatureExtractor):
                     f"is smaller than kernel_size={self.kernel_size}. "
                     f"Check input_size, kernel_size, stride, or padding."
                 )
+
+            if self.padding == "same":
+                tensor = same_pad_2d(
+                    tensor,
+                    kernel_size=self.kernel_size,
+                    stride=cast(tuple[int, int], conv.stride),
+                    dilation=cast(tuple[int, int], conv.dilation),
+                )
+
             tensor = conv(tensor)
             tensor = bn(tensor)
         return self.gap(tensor).flatten(1) 
