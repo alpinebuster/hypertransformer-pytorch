@@ -9,6 +9,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.data import Dataset
 import tree
 
 from hypertransformer.core import common_ht
@@ -761,7 +762,7 @@ class TaskGenerator:
 
 def make_numpy_data(
     sess,
-    ds,
+    ds: Dataset,
     batch_size: int,
     num_labels: int,
     samples_per_label: int,
@@ -774,7 +775,7 @@ def make_numpy_data(
 
     Arguments:
       sess: Initialized TF session.
-      ds: TF dataset.
+      ds: Torch dataset.
       batch_size: batch size to use for processing data.
       num_labels: total number of labels.
       samples_per_label: number of samples per label to accumulate.

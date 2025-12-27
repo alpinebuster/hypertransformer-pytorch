@@ -4,13 +4,13 @@ import functools
 import glob
 import math
 import os
+from typing import Callable, Optional, Dict, Iterable, Union, Any
 
-from typing import Callable, Optional
-
-import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
+from absl import logging
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.tensorboard import SummaryWriter
 
 from hypertransformer.core import transformer
 
@@ -58,7 +58,7 @@ def var_getter_wrapper(getter, name: str, *args, **kwargs):
         if add_trainable_weights:
             var_weights = getter(var_name, *args, **kwargs)
             if var_reg_weight > 0.0:
-                print(f"Adding weight variation regularization to {name}")
+                logging.info(f"Adding weight variation regularization to {name}")
                 built_weight_mag = tf.reduce_sum(tf.square(built_weights))
                 var_weight_mag = tf.reduce_sum(tf.square(var_weights))
                 reg_loss = var_reg_weight * built_weight_mag / (1e-8 + var_weight_mag)
@@ -78,7 +78,12 @@ def var_getter_wrapper(getter, name: str, *args, **kwargs):
     return all_weights[name]
 
 
-class TransformerIO(tf.Module):
+# ------------------------------------------------------------
+#   TransformerIO
+# ------------------------------------------------------------
+
+
+class _TransformerIO(nn.Module):
     """Encoder and decoder interfacing with the Transformer.
 
     1. SimpleTransformerIO
@@ -121,45 +126,37 @@ class TransformerIO(tf.Module):
         num_labels: int,
         num_weights: int,
         weight_block_size: int, # I_w
-        embedding_dim=8, # D_w
-        weight_embedding_dim=None, # D_l
+        embedding_dim: int = 8, # D_w
+        weight_embedding_dim: Optional[int] = None, # D_l
     ):
+        super().__init__()
+
         self.num_labels = num_labels
         self.num_weights = num_weights
         self.embedding_dim = embedding_dim
+
         if weight_embedding_dim is None:
             weight_embedding_dim = embedding_dim
         self.weight_embedding_dim = weight_embedding_dim
         self.weight_block_size = weight_block_size
-        self.label_embs = []
-        self.weight_embs = []
 
-        with tf.variable_scope(None, default_name="label_embeddings"):
-            # One additional class is reserved for "no label" class
-            for label_idx in range(self.num_labels + 1):
-                self.label_embs.append(
-                    tf.get_variable(
-                        f"label_{label_idx}",
-                        shape=(embedding_dim,),
-                        initializer=tf.random_normal_initializer(stddev=1.0),
-                        dtype=tf.float32,
-                    )
-                )
-        self.label_embs = tf.stack(self.label_embs, axis=0)
+        # One additional class is reserved for "no label" class
+        self.label_embs: nn.Embedding = nn.Embedding(
+            num_embeddings=num_labels + 1,
+            embedding_dim=embedding_dim,
+        )
+        # Weight embeddings are independent parameters (not an embedding table)
+        self.weight_embs: nn.ParameterList = nn.ParameterList(
+            [
+                nn.Parameter(torch.randn(weight_embedding_dim))
+                for _ in range(num_weights)
+            ]
+        )
 
-        with tf.variable_scope(None, default_name="weight_embeddings"):
-            for weight_idx in range(num_weights):
-                self.weight_embs.append(
-                    tf.get_variable(
-                        f"weight_{weight_idx}",
-                        shape=(weight_embedding_dim,),
-                        initializer=tf.random_normal_initializer(stddev=1.0),
-                        dtype=tf.float32,
-                    )
-                )
-
-    def _encode_labels(self, labels):
+    def _encode_labels(self, labels: torch.Tensor) -> torch.Tensor:
         """Generates label encodings.
+        labels: LongTensor [batch]
+        returns: FloatTensor [batch, embedding_dim]
 
         e.g. `tf.gather`
            label_embs = [
@@ -175,111 +172,164 @@ class TransformerIO(tf.Module):
                [1.0, 0.0],   # index 0
            ]
         """
-        return tf.gather(self.label_embs, labels, axis=0)
+        return self.label_embs(labels)
 
-    def decode_weights(self, embeddings):
+    def decode_weights(self, embeddings: torch.Tensor) -> list[torch.Tensor]:
         raise NotImplementedError
 
 
-class SimpleTransformerIO(TransformerIO):
+class SimpleTransformerIO(_TransformerIO):
     """Encoder and decoder interfacing with the Transformer."""
 
-    def encode_samples(self, images, labels):
-        """Generates Transformer inputs from input samples."""
-        with tf.name_scope(name=None, default_name="sample_encoder"):
-            batch_size = images.shape[0]
-            #                                        I_l
-            images = tf.reshape(images, [batch_size, -1])
-            encoded_labels = self._encode_labels(labels)
-            """
-            encoded_labels: [batch_size, label_dim]
-            images:         [batch_size, image_dim]
-                             ↓
-            [batch_size, label_dim + image_dim]
-            """
-            return tf.concat([encoded_labels, images], axis=-1)
+    def encode_samples(
+        self,
+        images: torch.Tensor,
+        labels: torch.Tensor,
+    ) -> torch.Tensor:
+        """Generates Transformer inputs from input samples.
 
-    def extend_label_mask(self, label_mask):
+        Args:
+           images: FloatTensor [batch, ...]
+           labels: LongTensor  [batch]
+
+        Returns: 
+           FloatTensor [batch, label_dim + image_dim]
+        """
+        batch_size: int = images.shape[0]
+
+        # Flatten image features
+        #                                I_l
+        images = images.view(batch_size, -1)
+        encoded_labels: torch.Tensor = self._encode_labels(labels)
+        """
+        encoded_labels: [batch_size, label_dim]
+        images:         [batch_size, image_dim]
+                            ↓
+        [batch_size, label_dim + image_dim]
+        """
+        return torch.cat([encoded_labels, images], dim=-1)
+
+    def extend_label_mask(self, label_mask: torch.Tensor) -> torch.Tensor:
         return label_mask
 
-    def decode_weights(self, embeddings):
-        """Generates weight patches from Transformer outputs."""
-        with tf.name_scope(name=None, default_name="weight_decoder"):
-            weights = []
-            for weight_emb in self.weight_embs:
-                weight_keys = embeddings[..., :self.weight_embedding_dim]
-                weight_values = embeddings[..., self.weight_embedding_dim:]
-                """
-                1. Dot product
-                   'i,i->' → sum_i a[i] * b[i]
-                
-                2. Matrix multiplication
-                   'ij,jk->ik' → C[i,k] = sum_j A[i,j] * B[j,k]
-                
-                3. Transpose
-                   'ij->ji' → Swap rows and columns of the matrix
-                
-                4. Reduction / Sum
-                   'ij->i' → Sum over dimension j, keep dimension i
-                
-                5. Outer product
-                   'i,j->ij' → Create matrix: C[i,j] = a[i] * b[j]
-                """
-                mixture = tf.einsum("j,ij->i", weight_emb, weight_keys)
-                mixture = tf.nn.softmax(mixture)
-                weights.append(tf.einsum("i,ij->j", mixture, weight_values))
-            return weights
+    def decode_weights(
+        self,
+        embeddings: torch.Tensor,
+    ) -> list[torch.Tensor]:
+        """Generates weight patches from Transformer outputs.
+
+        Args:
+           embeddings: FloatTensor [..., D_w + I_w]
+
+        Returns:
+           List of decoded weight tensors, each of shape [I_w]
+        """
+        weights: list[torch.Tensor] = []
+
+        # Split transformer outputs into keys and values
+        weight_keys: torch.Tensor = embeddings[..., :self.weight_embedding_dim]
+        weight_values: torch.Tensor = embeddings[..., self.weight_embedding_dim:]
+        for weight_emb in self.weight_embs:
+            """
+            mixture[i] = softmax( Σ_j weight_emb[j] * weight_keys[i, j] )
+            decoded[j] = Σ_t mixture[t] * weight_values[t, j]
+            """
+            # Dot product over embedding dim
+            # weight_emb:        [D_w]
+            # weight_keys:       [..., D_w]
+            # weight_values:     [..., I_w]
+            # mixture logits:    [...]
+            mixture = torch.einsum("j,...j->...", weight_emb, weight_keys)
+            mixture = F.softmax(mixture, dim=-1)
+
+            weights.append(torch.einsum("..., ...j->j", mixture, weight_values))
+
+        return weights
 
 
 class SeparateTransformerIO(SimpleTransformerIO):
     """IO for feeding samples into Encoder and getting weights from Decoder."""
 
-    def encode_weights(self):
+    def encode_weights(self) -> torch.Tensor:
+        """Generates weight patches from Transformer outputs.
+
+        Returns:
+           tokens: FloatTensor [num_weights, D_w + I_w]
+        """
+        tokens = []
+        for i in range(self.num_weights):
+            weight_emb: torch.Tensor = self.weight_embs[i]  # [D_w]
+            weight_zeros: torch.Tensor = torch.zeros(
+                self.weight_block_size,
+                device=weight_emb.device,
+                dtype=weight_emb.dtype,
+            )  # [I_w]
+
+            token: torch.Tensor = torch.cat([weight_emb, weight_zeros], dim=-1)
+            tokens.append(token)
+        return torch.stack(tokens, dim=0)
+
+    def decode_weights(
+        self,
+        embeddings: torch.Tensor,
+    ) -> list[torch.Tensor]:
         """Generates weight patches from Transformer outputs."""
-        with tf.name_scope(name=None, default_name="weight_encoder"):
-            tokens = []
-            for i in range(self.num_weights):
-                tensors = [
-                    self.weight_embs[i],
-                    tf.zeros(
-                        self.weight_block_size,
-                    ),
-                ]
-                tokens.append(tf.concat(tensors, axis=-1))
-            return tf.stack(tokens, axis=0)
+        weights: list[torch.Tensor] = []
 
-    def decode_weights(self, embeddings):
-        """Generates weight patches from Transformer outputs."""
-        with tf.name_scope(name=None, default_name="weight_decoder"):
-            weights = []
-            for i in range(self.num_weights):
-                weights.append(embeddings[i, self.weight_embedding_dim:])
-            return weights
+        for i in range(self.num_weights):
+            weights.append(embeddings[i, self.weight_embedding_dim:])
+        return weights
 
 
-class JointTransformerIO(TransformerIO):
+class JointTransformerIO(_TransformerIO):
     """Encoder and decoder interfacing with the Transformer."""
 
-    def encode_samples(self, images, labels):
-        """Generates Transformer inputs from input samples."""
-        with tf.name_scope(name=None, default_name="sample_encoder"):
-            batch_size = images.shape[0]
-            #                                        I_l
-            images = tf.reshape(images, [batch_size, -1])
-            encoded_labels = self._encode_labels(labels)
-            sequence = tf.concat([encoded_labels, images], axis=-1)
+    def encode_samples(
+        self,
+        images: torch.Tensor,
+        labels: torch.Tensor,
+    ) -> torch.Tensor:
+        """Generates Transformer inputs from input samples.
 
-        with tf.name_scope(name=None, default_name="weight_encoder"):
-            weight_sequence = []
-            for i in range(self.num_weights):
-                weight_emb = self.weight_embs[i]
-                zero_emb = tf.zeros(shape=images.shape[1:], dtype=tf.float32)
-                weight_sequence.append(tf.concat([weight_emb, zero_emb], axis=-1))
-            weight_sequence = tf.stack(weight_sequence, axis=0)
-            sequence = tf.concat([weight_sequence, sequence], axis=0)
+        Args:
+           images: FloatTensor [B, ...]
+           labels: LongTensor  [B]
+
+        Returns:
+           sequence: FloatTensor [num_weights + B, D_w + I_l]
+        """
+        # -------- sample --------
+        batch_size: int = images.shape[0]
+        # Flatten image features
+        #                                              I_l
+        images_flat: torch.Tensor = images.view(batch_size, -1)
+        encoded_labels: torch.Tensor = self._encode_labels(labels)
+        # [B, D_l + I_l]
+        sequence: torch.Tensor = torch.concat([encoded_labels, images], dim=-1)
+
+        # -------- weight --------
+        weight_sequence: Union[list[torch.Tensor], torch.Tensor] = []
+        image_dim: int = images_flat.shape[1]
+        for i in range(self.num_weights):
+            weight_emb: torch.Tensor = self.weight_embs[i] # [D_w]
+            zero_emb: torch.Tensor = torch.zeros(
+                image_dim,
+                dtype=sequence.dtype,
+                device=sequence.device,
+            ) # [I_l]
+
+            weight_token: torch.Tensor = torch.cat([weight_emb, zero_emb], dim=-1)
+            weight_sequence.append(weight_token)
+
+        # [num_weights, D_w + I_l]
+        weight_sequence = torch.stack(weight_sequence, dim=0)
+        # Concatenate weight tokens before sample tokens
+        # [num_weights + B, D_w + I_l]
+        sequence = torch.cat([weight_sequence, sequence], dim=0)
+
         return sequence
 
-    def extend_label_mask(self, label_mask):
+    def extend_label_mask(self, label_mask: torch.Tensor) -> torch.Tensor:
         """
         v---  num_weights  ---v\n
         [0, 0, 0, ..., 0, 0, 0]
@@ -289,22 +339,27 @@ class JointTransformerIO(TransformerIO):
         [0, 0, 0, ..., 0, 0, 0, m0, m1, m2, ..., mk]\n
          ^--- num_weights ---^
         """
-        weight_mask = tf.zeros((self.num_weights,), dtype=tf.float32)
-        return tf.concat([weight_mask, label_mask], axis=-1)
+        weight_mask = torch.zeros(
+            self.num_weights,
+            dtype=label_mask.dtype,
+            device=label_mask.device,
+        )
+        return torch.concat([weight_mask, label_mask], dim=-1)
 
-    def decode_weights(self, embeddings):
+    def decode_weights(
+        self,
+        embeddings: torch.Tensor,
+    ) -> list[torch.Tensor]:
         """Generates weight patches from Transformer outputs."""
-        with tf.name_scope(name=None, default_name="weight_decoder"):
-            weights = []
-            for i in range(self.num_weights):
-                weights.append(embeddings[i, self.weight_embedding_dim:])
-            return weights
+        weights: list[torch.Tensor] = []
+        for i in range(self.num_weights):
+            weights.append(embeddings[i, self.weight_embedding_dim:])
+        return weights
 
 
-def split_variable_name(name: str):
-    """Extracts layer name and variable name from the full variable scope."""
-    parts = name.split("/")
-    return parts[-2], parts[-1]
+# ------------------------------------------------------------
+#   Utils
+# ------------------------------------------------------------
 
 
 def _parse_label_spec(label_spec: str):
@@ -321,7 +376,6 @@ def _parse_label_spec(label_spec: str):
             raise ValueError("Wrong label specification format.")
     return labels
 
-
 def parse_dataset_spec(dataset_spec: str):
     """Parses the dataset specification."""
     if ":" not in dataset_spec:
@@ -336,68 +390,164 @@ def parse_dataset_spec(dataset_spec: str):
     return dataset_spec, _parse_label_spec(label_spec)
 
 
-def nonlinearity(activation: str):
+def nonlinearity(activation: str) -> Callable[[torch.Tensor], torch.Tensor]:
     if activation == "relu":
-        return tf.nn.relu
+        return F.relu
     elif activation == "gelu":
-        return tf2.nn.gelu
+        return F.gelu
     elif activation == "lrelu":
-        return functools.partial(tf.nn.leaky_relu, alpha=0.1)
+        return functools.partial(F.leaky_relu, negative_slope=0.1)
     else:
         raise ValueError(f"Unknown nonlinearity {activation}.")
 
 
-def extract_checkpoint_step(s: str):
-    # Files have format `prefix-<step>.index`
-    return int(s.rsplit(".", 1)[0].rsplit("-", 1)[1])
+def _extract_checkpoint_step(s: str) -> int:
+    """
+    Extract step from checkpoint filename with format `prefix-<step>.pth`.
 
+    Example:
+        model-1000.pth -> 1000
+    """
+    stem = s.rsplit(".", 1)[0]
+    return int(stem.rsplit("-", 1)[1])
 
-def find_latest_checkpoint(ckpt_dir: str):
-    all_checkpoints = glob.glob(os.path.join(ckpt_dir, "*.index"))
+def _find_latest_checkpoint(ckpt_dir: str) -> Optional[str]:
+    """Find latest checkpoint in directory by step number."""
+    all_checkpoints = glob.glob(os.path.join(ckpt_dir, "*.pth"))
     if not all_checkpoints:
         return None
 
-    latest = sorted(all_checkpoints, key=extract_checkpoint_step)[0]
-    return latest.rsplit(".", 1)[0]
+    latest = max(all_checkpoints, key=_extract_checkpoint_step)
+    return latest
 
+def latest_checkpoint(dir_or_checkpoint: str) -> Optional[str]:
+    """
+    Resolve checkpoint path.
 
-def latest_checkpoint(dir_or_checkpoint: str):
+    - If file exists → return it
+    - If directory → find latest checkpoint
+    """
     # That's actual checkpoint prefix.
-    if not os.path.isdir(dir_or_checkpoint) and os.path.exists(
-        dir_or_checkpoint + ".index"
-    ):
+    if os.path.isfile(dir_or_checkpoint):
         return dir_or_checkpoint
 
-    # Rely on tensorflow latest_checkpoint but if no "checkpoint" is present just
-    # scan the directory.
-    latest = tf.train.latest_checkpoint(dir_or_checkpoint)
-    return latest or find_latest_checkpoint(dir_or_checkpoint)
+    if os.path.isdir(dir_or_checkpoint):
+        return _find_latest_checkpoint(dir_or_checkpoint)
+
+    return None
+
+
+def load_variables(
+    loc: str,
+    var_list: Optional[Iterable[str]] = None,
+    step: Optional[int] = None,
+    map_location: Union[str, torch.device] = "cpu",
+) -> Dict[str, torch.Tensor]:
+    """
+    Load variables from a PyTorch checkpoint.
+
+    Args:
+        loc: Checkpoint file or directory.
+        var_list: Variable names to load.
+        step: Optional step suffix.
+        map_location: torch.load map_location.
+
+    Returns:
+        Dict[name, Tensor]
+    """
+    # File or Directory → latest checkpoint
+    path = latest_checkpoint(loc)
+    if path is None:
+        raise FileNotFoundError(f'No checkpoint available found at "{loc}"')
+
+    loc = path
+    if step is not None:
+        base, ext = os.path.splitext(loc)
+        loc = f"{base}-{step}{ext}"
+    if not os.path.exists(loc):
+        raise FileNotFoundError(f'Checkpoint not found: "{loc}"')
+
+    logging.info(f"Loading from {loc}")
+    ckpt: dict = torch.load(loc, map_location=map_location)
+    state_dict: Dict[str, torch.Tensor] = ckpt.get("state_dict", ckpt)
+
+    if var_list is None:
+        return dict(state_dict)
+
+    return {
+        name: state_dict[name]
+        for name in var_list
+        if name in state_dict
+    }
 
 
 class MultiFileWriter:
-    """Summary writer that supports writing to multiple files at once."""
+    """Summary writer that supports writing to multiple files at once.
 
-    def __init__(self, logdir: str, *args, **kwargs):
-        self.summary_args = list(args)
+    Usage:
+       ```py
+       writer = MultiFileWriter("logs")
+
+       writer.add_scalar("loss_1", 0.23, step, name="train")
+       writer.add_scalars(
+           "loss_2",
+           {
+               "train": 0.23,
+               "val": 0.31,
+           },
+           global_step=10,
+       )
+
+       writer.flush()
+       writer.close()
+       ```
+    """
+
+    def __init__(self, logdir: str, **kwargs):
         self.summary_kwargs = dict(kwargs)
         self.logdir = logdir
-        self.writers = {}
+        self.writers: Dict[Optional[str], SummaryWriter] = {}
 
-    def _get_writer(self, name: Optional[str] = None):
+    def _get_writer(self, name: Optional[str] = None) -> SummaryWriter:
         if name not in self.writers:
-            self.writers[name] = tf.summary.FileWriter(
+            self.writers[name] = SummaryWriter(
                 os.path.join(self.logdir, name or ""),
-                *self.summary_args,
                 **self.summary_kwargs,
             )
         return self.writers[name]
 
-    def add_summary(self, summary, global_step=None):
-        if isinstance(summary, dict):
-            for k, v in summary.items():
-                self._get_writer(k).add_summary(v, global_step=global_step)
-        else:
-            self._get_writer().add_summary(summary, global_step=global_step)
+    def _normalize_tag(self, tag: str) -> str:
+        """
+        Converts xxx_1, xxx_2 -> xxx
+        Keeps original tag if suffix is not numeric.
+        """
+        if "_" not in tag:
+            return tag
+        normalized_tag, value = tag.rsplit("_", 1)
+        return normalized_tag if value.isdigit() else tag
+
+    def add_scalar(
+        self,
+        tag: str,
+        value: float,
+        global_step: Optional[int] = None,
+        name: Optional[str] = None
+    ):
+        tag = self._normalize_tag(tag)
+        self._get_writer(name).add_scalar(tag, value, global_step)
+
+    def add_scalars(
+        self,
+        scalars: Dict[str, float],
+        global_step: Optional[int] = None
+    ):
+        """
+        Write multiple scalars to different sub-writers.
+        """
+        for name, value in scalars.items():
+            self._get_writer(name).add_scalar(
+                self._normalize_tag(name), value, global_step
+            )
 
     def close(self):
         for each in self.writers.values():
@@ -406,54 +556,6 @@ class MultiFileWriter:
     def flush(self):
         for each in self.writers.values():
             each.flush()
-
-
-def _normalize_tag(tag: str):
-    if "_" not in tag:
-        return tag
-    normalized_tag, value = tag.rsplit("_", 1)
-    return normalized_tag if value.isdigit() else tag
-
-
-def normalize_tags(s):
-    """Normalizes tags inside serialized summary proto."""
-    if isinstance(s, bytes):
-        summary_proto = tf.summary.Summary.FromString(s)
-        tags = set([v.tag for v in summary_proto.value])
-        tag_map = {tag: tag for tag in tags}
-        for each in tags:
-            normalized_tag = _normalize_tag(each)
-            if normalized_tag not in tag_map.values():
-                tag_map[each] = normalized_tag
-        for v in summary_proto.value:
-            v.tag = tag_map[v.tag]
-        return summary_proto.SerializeToString()
-    elif isinstance(s, dict):
-        for name in list(s.keys()):
-            s[name] = normalize_tags(s[name])
-        return s
-    raise ValueError(f"Unexpected input {s}")
-
-
-def load_variables(loc: str, var_list=None, step=None):
-    """Returns variables from a given checkpoint."""
-    path = latest_checkpoint(loc)
-    if path is None:
-        raise FileNotFoundError(f'No checkpoint available found at "{loc}"')
-
-    loc = path
-    if step is not None:
-        base, _ = loc.rsplit("-", 1)
-        loc = "-".join([base, "%d" % step])
-
-    tf.logging.info("Loading from %s ", loc)
-    ckpt = tf.train.load_checkpoint(loc)
-
-    result = {}
-    for tensor in var_list or ckpt.get_variable_to_shape_map():
-        result[tensor] = ckpt.get_tensor(tensor)
-
-    return result
 
 
 def same_pad_2d(
@@ -521,3 +623,35 @@ def same_pad_2d(
     pad_right = pad_w - pad_left
 
     return F.pad(x, (pad_left, pad_right, pad_top, pad_bottom))
+
+def print_gpu_detailed_info() -> None:
+    logging.info("========== GPU / CUDA INFO ==========")
+    logging.info(f"CUDA_VISIBLE_DEVICES: {os.environ.get("CUDA_VISIBLE_DEVICES", "<ALL>")}")
+    logging.info(f"CUDA Available: {torch.cuda.is_available()}")
+    logging.info(f"PyTorch Version: {torch.__version__}")
+    logging.info(f"PyTorch CUDA Version: {torch.version.cuda}") # type: ignore[attr-defined]
+
+    if not torch.cuda.is_available():
+        logging.info("Running on CPU only")
+        logging.info("====================================")
+        return
+
+    logging.info("Visible GPU Count:", torch.cuda.device_count())
+
+    for i in range(torch.cuda.device_count()):
+        props = torch.cuda.get_device_properties(i)
+
+        total_mem = props.total_memory / 1024**3
+        allocated = torch.cuda.memory_allocated(i) / 1024**3
+        reserved = torch.cuda.memory_reserved(i) / 1024**3
+
+        logging.info(f"\n--- GPU {i} ---")
+        logging.info(f"Name: {props.name}")
+        logging.info(f"Compute Capability: {props.major}.{props.minor}")
+        logging.info(f"Total Memory: {total_mem:.2f} GB")
+        logging.info(f"Memory Allocated: {allocated:.2f} GB")
+        logging.info(f"Memory Reserved: {reserved:.2f} GB")
+        logging.info(f"Multi-processor Count: {props.multi_processor_count}")
+        logging.info(f"Max Threads per SM: {props.max_threads_per_multi_processor}")
+
+    logging.info("====================================")

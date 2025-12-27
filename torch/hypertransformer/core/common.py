@@ -55,7 +55,7 @@ def get_default_saver():
 class TrainState:
     """Model state."""
 
-    train_op: tf.Tensor
+    train_op: torch.Tensor
     init_op: Optional[tf.Operation] = None
     step_initializer: Optional[tf.Operation] = None
     update_op: tf.Operation = field(default_factory=tf.no_op)
@@ -66,7 +66,7 @@ class TrainState:
         default_factory=list
     )
 
-    global_step: tf.Tensor = dataclasses.field(
+    global_step: torch.Tensor = dataclasses.field(
         default_factory=tf.train.get_or_create_global_step
     )
 
@@ -76,7 +76,7 @@ class TrainState:
     record_graph_in_summary: dataclasses.InitVar[bool] = True
 
     tensors_to_eval: Optional[Any] = None
-    per_step_fn: Optional[Callable[[tf.Tensor, Any, Any], None]] = None
+    per_step_fn: Optional[Callable[[torch.Tensor, Any, Any], None]] = None
     checkpoint_suffix: str = "model"
 
     def __post_init__(self, record_graph_in_summary: bool):
@@ -99,10 +99,10 @@ class OptimizerConfig:
 class ModelOutputs:
     """Model outputs."""
 
-    predictions: tf.Tensor
-    accuracy: tf.Tensor
-    labels: Optional[tf.Tensor] = None
-    test_accuracy: Optional[tf.Tensor] = None
+    predictions: torch.Tensor
+    accuracy: torch.Tensor
+    labels: Optional[torch.Tensor] = None
+    test_accuracy: Optional[torch.Tensor] = None
 
 
 def merge_summaries(summaries):
@@ -115,7 +115,7 @@ def merge_summaries(summaries):
 
 
 def _is_not_empty(tensor):
-    if isinstance(tensor, tf.Tensor):
+    if isinstance(tensor, torch.Tensor):
         return True
     return (
         tensor is not None and len(tensor) > 0

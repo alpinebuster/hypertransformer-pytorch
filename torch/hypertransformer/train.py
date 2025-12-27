@@ -1,5 +1,6 @@
 """Training binary."""
 
+import os
 import functools
 from typing import Optional
 
@@ -7,7 +8,6 @@ from absl import app, flags, logging
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from hypertransformer import common_flags
 from hypertransformer import eval_model_flags  # pylint:disable=unused-import
@@ -22,9 +22,15 @@ from hypertransformer.core import util
 FLAGS = flags.FLAGS
 
 
+# ------------------------------------------------------------
+#   Configurations
+# ------------------------------------------------------------
+
+
 def make_train_config():
     return common.TrainConfig(
-        train_steps=FLAGS.train_steps, steps_between_saves=FLAGS.steps_between_saves
+        train_steps=FLAGS.train_steps,
+        steps_between_saves=FLAGS.steps_between_saves,
     )
 
 
@@ -36,7 +42,7 @@ def make_optimizer_config():
     )
 
 
-def common_model_config():
+def _common_model_config():
     """Returns common ModelConfig parameters."""
     return {
         "num_transformer_samples": FLAGS.samples_transformer,
@@ -56,7 +62,6 @@ def common_model_config():
         "shared_fe_dropout": FLAGS.shared_fe_dropout,
         "fe_dropout": FLAGS.fe_dropout,
     }
-
 
 def make_layerwise_model_config():
     """Makes 'layerwise' model config."""
@@ -103,25 +108,7 @@ def make_layerwise_model_config():
         l2_reg_weight=FLAGS.l2_reg_weight,
         logits_feature_extractor=FLAGS.logits_feature_extractor,
         shared_head_weight=common_flags.SHARED_HEAD_WEIGHT.value,
-        **common_model_config(),
-    )
-
-
-def make_optimizer(optim_config: common.OptimizerConfig, global_step):
-    learning_rate = tf.train.exponential_decay(
-        optim_config.learning_rate,
-        global_step,
-        optim_config.lr_decay_steps,
-        optim_config.lr_decay_rate,
-    )
-    optimizer = tf.train.GradientDescentOptimizer(learning_rate=learning_rate)
-    return learning_rate, optimizer
-
-
-def make_train_op(optimizer, loss, train_vars=None):
-    global_step = tf.train.get_or_create_global_step()
-    return optimizer.minimize(
-        tf.reduce_mean(loss), global_step=global_step, var_list=train_vars
+        **_common_model_config(),
     )
 
 
@@ -156,7 +143,6 @@ def make_dataset_config(dataset_spec=""):
 
 def _default(new: float, default: float):
     return new if new >= 0 else default
-
 
 def make_test_dataset_config(dataset_spec=""):
     if not dataset_spec:
@@ -196,6 +182,29 @@ def make_test_dataset_config(dataset_spec=""):
     )
 
 
+# ------------------------------------------------------------
+#   Training State
+# ------------------------------------------------------------
+
+
+def make_optimizer(optim_config: common.OptimizerConfig, global_step):
+    learning_rate = tf.train.exponential_decay(
+        optim_config.learning_rate,
+        global_step,
+        optim_config.lr_decay_steps,
+        optim_config.lr_decay_rate,
+    )
+    optimizer = tf.train.GradientDescentOptimizer(learning_rate=learning_rate)
+    return learning_rate, optimizer
+
+
+def make_train_op(optimizer, loss, train_vars=None):
+    global_step = tf.train.get_or_create_global_step()
+    return optimizer.minimize(
+        tf.reduce_mean(loss), global_step=global_step, var_list=train_vars
+    )
+
+
 def _make_warmup_loss(loss_heads, loss_prediction, global_step):
     """Uses head losses to build aggregate loss cycling through them."""
     # The warmup period is broken into a set of "head activation periods".
@@ -230,7 +239,6 @@ def _make_warmup_loss(loss_heads, loss_prediction, global_step):
     loss += weight * loss_prediction
     return loss, weights
 
-
 def make_loss(labels, predictions, heads: list):
     """Makes a full loss including head 'warmup' losses."""
     losses = []
@@ -247,7 +255,12 @@ def make_loss(labels, predictions, heads: list):
     return loss, losses, wamup_weights
 
 
-def create_shared_head(
+# ------------------------------------------------------------
+#   Model
+# ------------------------------------------------------------
+
+
+def _create_shared_head(
     shared_features,
     real_classes,
     real_class_min: Optional[int],
@@ -257,7 +270,7 @@ def create_shared_head(
     if real_classes is None or shared_features is None:
         return None, None
     if real_class_min is None or real_class_max is None:
-        tf.logging.warning(
+        logging.warning(
             "Training classes boundaries are not provided. "
             "Skipping shared head creation!"
         )
@@ -289,7 +302,7 @@ def create_layerwise_model(
     optim_config: common.OptimizerConfig,
 ):
     """Creates a hierarchical Transformer-CNN model."""
-    tf.logging.info("Building the model")
+    logging.info("Building the model")
     global_step = tf.train.get_or_create_global_step()
     model_builder = layerwise.build_model(
         model_config.cnn_model_name,
@@ -355,7 +368,7 @@ def create_layerwise_model(
                 tf.summary.scalar("loss/regularization", tf.reduce_sum(reg_losses))
             )
 
-        shared_head_loss, shared_head_acc = create_shared_head(
+        shared_head_loss, shared_head_acc = _create_shared_head(
             weight_blocks.shared_features,
             dataset.transformer_real_classes,
             dataset.real_class_min,
@@ -415,7 +428,7 @@ def create_shared_feature_model(
 ):
     """Creates an image feature extractor model for pre-training."""
     del test_dataset
-    tf.logging.info("Building the model")
+    logging.info("Building the model")
 
     global_step = tf.train.get_or_create_global_step()
     model_builder = layerwise.build_model(
@@ -434,7 +447,7 @@ def create_shared_feature_model(
         )
 
     with tf.variable_scope("loss"):
-        shared_head_loss, shared_head_acc = create_shared_head(
+        shared_head_loss, shared_head_acc = _create_shared_head(
             weight_blocks.shared_features,
             dataset.transformer_real_classes,
             dataset.real_class_min,
@@ -455,25 +468,43 @@ def create_shared_feature_model(
     )
 
 
-def _cut_index(name):
-    return name.rsplit(":", 1)[0]
+# ------------------------------------------------------------
+#   Model Loading
+# ------------------------------------------------------------
 
 
-def restore_shared_features():
+def restore_shared_features(
+    model: nn.Module,
+    checkpoint: str = common_flags.RESTORE_SHARED_FEATURES_FROM.value,
+) -> Optional[nn.Module]:
     """Restores shared feature extractor variables from a checkpoint."""
-    checkpoint = common_flags.RESTORE_SHARED_FEATURES_FROM.value
     if not checkpoint:
         return None
-    all_vars = tf.trainable_variables()
-    shared_vars = [v for v in all_vars if v.name.find("model/shared_features") >= 0]
-    shared_vars += [v for v in all_vars if v.name.find("loss/shared_head") >= 0]
-    var_values = util.load_variables(
-        checkpoint, [_cut_index(v.name) for v in shared_vars]
+
+    # The parameter names in the current model
+    model_state: dict[str, torch.Tensor] = model.state_dict()
+    # Get shared features / head
+    shared_keys = [
+        k for k in model_state.keys()
+        if "model.shared_features" in k
+        or "loss.shared_head" in k
+    ]    
+    if not shared_keys:
+        return None
+
+    loaded_vars = util.load_variables(
+        checkpoint,
+        var_list=shared_keys,
+        map_location="cpu",
     )
-    assign_ops = []
-    for var in shared_vars:
-        assign_ops.append(tf.assign(var, var_values[_cut_index(var.name)]))
-    return tf.group(assign_ops)
+    model.load_state_dict(loaded_vars, strict=False)
+
+    return model
+
+
+# ------------------------------------------------------------
+#   Main Entrance
+# ------------------------------------------------------------
 
 
 def train(
@@ -485,7 +516,7 @@ def train(
 ):
     """Main function training the model."""
     state = train_lib.ModelState()
-    tf.logging.info("Creating the dataset")
+    logging.info("Creating the dataset")
     dataset, dataset_state = train_lib.make_dataset(
         model_config=layerwise_model_config,
         data_config=dataset_config,
@@ -511,7 +542,7 @@ def train(
             create_layerwise_model, model_config=layerwise_model_config
         )
 
-    tf.logging.info("Training")
+    logging.info("Training")
     train_state = create_model(**args)
     with tf.Session():
         init_op = restore_shared_features()
@@ -526,11 +557,14 @@ def main(argv):
     if len(argv) > 1:
         raise app.UsageError("Too many command-line arguments.")
 
-    logging.info(f"\nFLAGS: {FLAGS.flag_values_dict()}\n")
+    logging.info(f"FLAGS: {FLAGS.flag_values_dict()}")
 
-    tf.disable_eager_execution()
-    for gpu in tf.config.list_physical_devices("GPU"):
-        tf.config.experimental.set_memory_growth(gpu, True)
+    gpus: str = FLAGS.gpus
+    if gpus is None or gpus == "all":
+        os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+    else:
+        os.environ["CUDA_VISIBLE_DEVICES"] = gpus
+    util.print_gpu_detailed_info()
 
     train(
         train_config=make_train_config(),

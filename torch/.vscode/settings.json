@@ -3,6 +3,7 @@
         "absl",
         "avgpool",
         "convs",
+        "embs",
         "hypertransformer",
         "layerwise",
         "lrelu",

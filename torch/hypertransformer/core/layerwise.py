@@ -376,7 +376,7 @@ class SeparateGenerator(Generator):
 # ------------------------------------------------------------
 
 
-class BaseCNNLayer(tf.Module):
+class BaseCNNLayer(nn.Module):
     """Base CNN layer used in our models."""
 
     def __init__(

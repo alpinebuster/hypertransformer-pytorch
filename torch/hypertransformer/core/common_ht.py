@@ -4,11 +4,11 @@ import dataclasses
 import enum
 import functools
 
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, List, Optional, Callable
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.data import Dataset
 
 if TYPE_CHECKING:
     from hypertransformer.core.layerwise import GeneratedWeights
@@ -57,7 +57,7 @@ class DatasetConfig:
     ds_split: str = "train"
     meta_dataset_split: str = "train"
     data_dir: Optional[str] = None
-    ds: Optional[tf.data.Dataset] = None
+    ds: Optional[Dataset] = None
     dataset_info: Optional[DatasetInfo] = None
     per_label_augmentation: bool = False
     cache_path: str = ""
@@ -209,33 +209,38 @@ class LayerwiseModelConfig(ModelConfig):
 class DatasetSamples:
     """Dataset samples."""
 
-    transformer_images: tf.Tensor # Support set
-    transformer_labels: tf.Tensor
-    transformer_real_classes: Optional[tf.Tensor]
-    cnn_images: tf.Tensor # Query set
-    cnn_labels: tf.Tensor
-    cnn_real_classes: Optional[tf.Tensor]
+    transformer_images: torch.Tensor # Support set
+    transformer_labels: torch.Tensor
+    transformer_real_classes: Optional[torch.Tensor]
+    cnn_images: torch.Tensor # Query set
+    cnn_labels: torch.Tensor
+    cnn_real_classes: Optional[torch.Tensor]
     randomize_op: tf.Operation
-    transformer_masks: Optional[tf.Tensor] = None
+    transformer_masks: Optional[torch.Tensor] = None
     real_class_min: Optional[int] = None
     real_class_max: Optional[int] = None
 
 
-def get_cnn_activation(config: LayerwiseModelConfig):
+def get_cnn_activation(
+    config: LayerwiseModelConfig
+) -> Callable[[torch.Tensor], torch.Tensor]:
     if config.cnn_activation == "relu":
-        return tf.nn.relu
+        return F.relu
     elif config.cnn_activation == "lrelu":
-        # This alpha value is used in the HowToTrainYourMAML code
-        return functools.partial(tf.nn.leaky_relu, alpha=0.01)
+        # This `negative_slope` value is used in the HowToTrainYourMAML code
+        return functools.partial(F.leaky_relu, negative_slope=0.01)
     else:
         raise ValueError(f"Unknown CNN nonlinearity {config.cnn_activation}.")
 
 
-def get_transformer_activation(config: LayerwiseModelConfig):
+def get_transformer_activation(
+    config: LayerwiseModelConfig
+) -> Callable[[torch.Tensor], torch.Tensor]:
     if config.transformer_activation == "softmax":
-        return tf.nn.softmax
+        # Note: PyTorch's `softmax` requires specifying dimensions
+        return lambda x: F.softmax(x, dim=-1)
     elif config.transformer_activation == "sigmoid":
-        return tf.nn.sigmoid
+        return torch.sigmoid
     else:
         raise ValueError(
             f"Unknown Transformer nonlinearity {config.transformer_activation}."
