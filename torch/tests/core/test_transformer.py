@@ -81,7 +81,7 @@ def test_pwfeedforward(
     [
         (2, 4, 4, 32, 32, 1),    # Sinle head self-attention
         (2, 8, 8, 64, 64, 4),    # Multi heads self-attention
-        (1, 5, 7, 128, 128, 8), # Multi heads cross-attention
+        (1, 5, 7, 128, 128, 8),  # Multi heads cross-attention
     ],
 )
 @pytest.mark.parametrize(
@@ -293,62 +293,61 @@ def test_decoder_layer(
 # ------------------------------------------------------------
 #   Class `EncoderDecoderModel` Tests
 # ------------------------------------------------------------
-@pytest.fixture
-def transformer_params():
-    return TransformerParams(
-        mha_output_dim=512,
-        query_key_dim=32,
-        value_dim=32,
-        internal_dim=1024,
-        num_layers=2,
-        heads=8,
-    )
+
+
+@pytest.fixture(params=[
+    {
+        "mha_output_dim": 512,
+        "query_key_dim": 32,
+        "value_dim": 32,
+        "internal_dim": 1024,
+        "num_layers": 2,
+        "heads": 8,
+    },
+    {
+        "mha_output_dim": 256,
+        "query_key_dim": 64,
+        "value_dim": 64,
+        "internal_dim": 512, # params.internal_dim > 0  -> Has FFN
+        "num_layers": 4,
+        "heads": 4,
+    },
+    {
+        "mha_output_dim": 256,
+        "query_key_dim": 64,
+        "value_dim": 64,
+        "internal_dim": 0, # params.internal_dim <= 0 -> NO FFN
+        "num_layers": 4,
+        "heads": 4,
+    },
+])
+def transformer_params(request):
+    return TransformerParams(**request.param)
 
 @pytest.mark.parametrize(
-    "query_key_dim,value_dim,num_layers,heads,internal_dim",
+    "batch_size,seq_len",
     [
-        (128,  64, 1, 4, 1024), # params.internal_dim > 0  -> Has FFN
-        (256, 128, 2, 8, 0),    # params.internal_dim <= 0 -> NO FFN
-    ],
-)
-@pytest.mark.parametrize(
-    "batch_size, seq_len, hidden_dim, mha_output_dim",
-    [
-        (2, 8, 64, 64), # [batch_size, seq_len, hidden_dim] ← Normal conditions
-        (None, 8, 128, 128), # [seq_len, hidden_dim]             ← NO batch dimension
+        # hidden_dim == mha_output_dim
+        (2, 8), # [batch_size, seq_len, hidden_dim] ← Normal conditions
+        (None, 8), # [seq_len, hidden_dim] ← NO batch dimension
     ],
 )
 def test_encoderdecodermodel(
-    query_key_dim: int,
-    value_dim: int,
-    num_layers: int,
-    heads: int,
-    internal_dim: int,
+    transformer_params: TransformerParams,
     batch_size: int,
     seq_len: int,
-    hidden_dim: int,
-    mha_output_dim: int,
 ):
     torch.manual_seed(0)
 
-    params = TransformerParams(
-        query_key_dim=query_key_dim,
-        value_dim=value_dim,
-        mha_output_dim=mha_output_dim,
-        internal_dim=internal_dim,
-        num_layers=num_layers,
-        heads=heads,
-        dropout_rate=0.1,
-    )
-
+    assert transformer_params.mha_output_dim is not None
     if batch_size is None:
-        x = torch.randn(seq_len, hidden_dim)
-        expected_shape = (seq_len, hidden_dim)
+        x = torch.randn(seq_len, transformer_params.mha_output_dim)
+        expected_shape = (seq_len, transformer_params.mha_output_dim)
     else:
-        x = torch.randn(batch_size, seq_len, hidden_dim)
-        expected_shape = (batch_size, seq_len, hidden_dim)
+        x = torch.randn(batch_size, seq_len, transformer_params.mha_output_dim)
+        expected_shape = (batch_size, seq_len, transformer_params.mha_output_dim)
 
-    model = EncoderDecoderModel(params)
+    model = EncoderDecoderModel(transformer_params)
     model.eval()
     out: torch.Tensor = model(x)
 
@@ -362,50 +361,28 @@ def test_encoderdecodermodel(
 
 
 @pytest.mark.parametrize(
-    "query_key_dim,value_dim,num_layers,heads,internal_dim",
+    "batch_size,seq_len",
     [
-        (128,  64, 1, 4, 1024), # params.internal_dim > 0  -> Has FFN
-        (256, 128, 2, 8, 0),    # params.internal_dim <= 0 -> NO FFN
-    ],
-)
-@pytest.mark.parametrize(
-    "batch_size, seq_len, hidden_dim, mha_output_dim",
-    [
-        (2, 8, 64, 64), # [batch_size, seq_len, hidden_dim] ← Normal conditions
-        (None, 8, 128, 128), # [seq_len, hidden_dim]             ← NO batch dimension
+        (2, 8), # [batch_size, seq_len, hidden_dim] ← Normal conditions
+        (None, 8), # [seq_len, hidden_dim] ← NO batch dimension
     ],
 )
 def test_encodermodel(
-    query_key_dim: int,
-    value_dim: int,
-    num_layers: int,
-    heads: int,
-    internal_dim: int,
+    transformer_params: TransformerParams,
     batch_size: int,
     seq_len: int,
-    hidden_dim: int,
-    mha_output_dim: int,
 ):
     torch.manual_seed(0)
 
-    params = TransformerParams(
-        query_key_dim=query_key_dim,
-        value_dim=value_dim,
-        mha_output_dim=mha_output_dim,
-        internal_dim=internal_dim,
-        num_layers=num_layers,
-        heads=heads,
-        dropout_rate=0.1,
-    )
-
+    assert transformer_params.mha_output_dim is not None
     if batch_size is None:
-        x = torch.randn(seq_len, hidden_dim)
-        expected_shape = (seq_len, hidden_dim)
+        x = torch.randn(seq_len, transformer_params.mha_output_dim)
+        expected_shape = (seq_len, transformer_params.mha_output_dim)
     else:
-        x = torch.randn(batch_size, seq_len, hidden_dim)
-        expected_shape = (batch_size, seq_len, hidden_dim)
+        x = torch.randn(batch_size, seq_len, transformer_params.mha_output_dim)
+        expected_shape = (batch_size, seq_len, transformer_params.mha_output_dim)
 
-    model = EncoderModel(params)
+    model = EncoderModel(transformer_params)
     model.eval()
     out: torch.Tensor = model(x)
 
@@ -419,59 +396,31 @@ def test_encodermodel(
 
 
 @pytest.mark.parametrize(
-    "query_key_dim,value_dim,num_layers,heads,internal_dim",
+    "batch_size, seq_len",
     [
-        (128,  64, 1, 4, 1024), # params.internal_dim > 0  -> Has FFN
-        (256, 128, 2, 8, 0),    # params.internal_dim <= 0 -> NO FFN
-    ],
-)
-@pytest.mark.parametrize(
-    "batch_size, seq_len, hidden_dim, mha_output_dim",
-    [
-        (2, 8, 64, 64), # [batch_size, seq_len, hidden_dim] ← Normal conditions
-        (None, 8, 128, 128), # [seq_len, hidden_dim]             ← NO batch dimension
+        (2, 8), # [batch_size, seq_len, hidden_dim] ← Normal conditions
+        (None, 8), # [seq_len, hidden_dim] ← NO batch dimension
     ],
 )
 def test_separateencoderdecoder_model(
-    query_key_dim: int,
-    value_dim: int,
-    num_layers: int,
-    heads: int,
-    internal_dim: int,
+    transformer_params: TransformerParams,
     batch_size: int,
     seq_len: int,
-    hidden_dim: int,
-    mha_output_dim: int,
 ):
     torch.manual_seed(0)
 
-    encoder_params = TransformerParams(
-        query_key_dim=query_key_dim,
-        value_dim=value_dim,
-        mha_output_dim=mha_output_dim,
-        internal_dim=internal_dim,
-        num_layers=num_layers,
-        heads=heads,
-        dropout_rate=0.1,
-    )
-    decoder_params = TransformerParams(
-        query_key_dim=query_key_dim,
-        value_dim=value_dim,
-        mha_output_dim=mha_output_dim,
-        internal_dim=internal_dim,
-        num_layers=num_layers,
-        heads=heads,
-        dropout_rate=0.1,
-    )
+    encoder_params = transformer_params
+    decoder_params = transformer_params
 
+    assert transformer_params.mha_output_dim is not None
     if batch_size is None:
-        x = torch.randn(seq_len, hidden_dim)
-        weight_sequence = torch.randn(seq_len*2, hidden_dim)
-        expected_shape = (seq_len*2, hidden_dim)
+        x = torch.randn(seq_len, transformer_params.mha_output_dim)
+        weight_sequence = torch.randn(seq_len*2, transformer_params.mha_output_dim)
+        expected_shape = (seq_len*2, transformer_params.mha_output_dim)
     else:
-        x = torch.randn(batch_size, seq_len, hidden_dim)
-        weight_sequence = torch.randn(batch_size, seq_len*2, hidden_dim)
-        expected_shape = (batch_size, seq_len*2, hidden_dim)
+        x = torch.randn(batch_size, seq_len, transformer_params.mha_output_dim)
+        weight_sequence = torch.randn(batch_size, seq_len*2, transformer_params.mha_output_dim)
+        expected_shape = (batch_size, seq_len*2, transformer_params.mha_output_dim)
 
     model = SeparateEncoderDecoderModel(
         encoder_params=encoder_params,
