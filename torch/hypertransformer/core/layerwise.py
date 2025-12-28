@@ -4,7 +4,8 @@ import dataclasses
 import functools
 import math
 
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Union, Sequence, \
+    Tuple
 
 import torch
 import torch.nn as nn
@@ -21,16 +22,16 @@ BETA_SCALE = 1.0
 GAMMA_BIAS = 0.0
 BETA_BIAS = 0.0
 
-models = {}
+models: Dict[str, Callable[..., "LayerwiseModel"]] = {}
 
 HeadBuilder = Callable[..., "BaseCNNLayer"]
 
 
 @dataclasses.dataclass
 class GeneratedWeights:
-    weight_blocks: List[List[tf.Tensor]]
-    head_weight_blocks: Dict[str, List[tf.Tensor]]
-    shared_features: Optional[tf.Tensor] = None
+    weight_blocks: List[List[torch.Tensor]]
+    head_weight_blocks: Dict[str, List[torch.Tensor]]
+    shared_features: Optional[torch.Tensor] = None
 
 
 def build_model(name: str, model_config: common_ht.LayerwiseModelConfig) -> "LayerwiseModel":
@@ -38,9 +39,14 @@ def build_model(name: str, model_config: common_ht.LayerwiseModelConfig) -> "Lay
     return model_fn(model_config=model_config)
 
 
-def get_remove_probability(max_probability: float):
-    """Returns a random probability between 0 and `max_probability`."""
-    return tf.random.uniform(shape=(), dtype=tf.float32) * max_probability
+def get_remove_probability(max_probability: float) -> torch.Tensor:
+    """Returns a random probability between 0 and `max_probability`.
+
+    e.g.
+       >>> torch.rand(size=()) 
+           tensor(0.6942)
+    """
+    return torch.rand(size=()) * max_probability
 
 
 def get_l2_regularizer(weight=None):
@@ -49,7 +55,11 @@ def get_l2_regularizer(weight=None):
     return tf.keras.regularizers.L2(l2=weight)
 
 
-def remove_some_samples(labels, model_config: LayerwiseModelConfig, mask):
+def remove_some_samples(
+    labels: torch.Tensor,
+    model_config: "LayerwiseModelConfig",
+    mask: Optional[torch.Tensor] = None,
+) -> Optional[torch.Tensor]:
     """Returns a random label mask removing some labeled and unlabeled samples."""
     if (
         model_config.max_prob_remove_unlabeled <= 0.0
@@ -57,35 +67,37 @@ def remove_some_samples(labels, model_config: LayerwiseModelConfig, mask):
     ):
         return mask
 
+    # Unlabeled samples
     if model_config.max_prob_remove_unlabeled > 0.0:
         # Dropping samples with a random probability between 0 and
         # `max_prob_remove_unlabeled`.
         prob = get_remove_probability(model_config.max_prob_remove_unlabeled)
         # Removing unlabeled samples with probability `prob`
-        new_mask = tf.cast(tf.math.equal(labels, model_config.num_labels), tf.float32)
-        masked_uniform = new_mask * tf.random.uniform(shape=new_mask.shape)
-        mask_unlabeled = tf.cast(masked_uniform > 1 - prob, tf.float32)
+        # A label with a value of `num_labels` indicates no label
+        new_mask = (labels == model_config.num_labels).float()
+        masked_uniform = new_mask * torch.rand_like(new_mask)
+        mask_unlabeled = (masked_uniform > 1-prob).float()
     else:
-        mask_unlabeled = tf.zeros_like(labels, dtype=tf.float32)
+        mask_unlabeled = torch.zeros_like(labels, dtype=torch.float32)
 
+    # Labeled samples
     if model_config.max_prob_remove_labeled > 0.0:
         # Dropping samples with a random probability between 0 and
         # `max_prob_remove_labeled`.
         prob = get_remove_probability(model_config.max_prob_remove_labeled)
         # Removing labeled samples with probability `prob`
-        new_mask = tf.cast(
-            tf.math.not_equal(labels, model_config.num_labels), tf.float32
-        )
-        masked_uniform = new_mask * tf.random.uniform(shape=new_mask.shape)
-        mask_labeled = tf.cast(masked_uniform > 1 - prob, tf.float32)
+        new_mask =  (labels != model_config.num_labels).float()
+        masked_uniform = new_mask * torch.rand_like(new_mask)
+        mask_labeled = (masked_uniform > 1-prob).float()
     else:
-        mask_labeled = tf.zeros_like(labels, dtype=tf.float32)
+        mask_labeled = torch.zeros_like(labels, dtype=torch.float32)
 
+    # Combine masks
     # Boolean "or" equivalent for 3 masks (1 indicates a missing value).
     if mask is None:
-        return tf.clip_by_value(mask_labeled + mask_unlabeled, 0.0, 1.0)
+        return torch.clamp(mask_labeled + mask_unlabeled, 0.0, 1.0)
     else:
-        return tf.clip_by_value(mask_labeled + mask_unlabeled + mask, 0.0, 1.0)
+        return torch.clamp(mask_labeled + mask_unlabeled + mask, 0.0, 1.0)
 
 
 # ------------------------------------------------------------
@@ -93,27 +105,37 @@ def remove_some_samples(labels, model_config: LayerwiseModelConfig, mask):
 # ------------------------------------------------------------
 
 
-class Generator:
+class _Generator:
     """Generic generator."""
 
-    def __init__(self, name: str, model_config: LayerwiseModelConfig):
+    def __init__(self, name: str, model_config: "LayerwiseModelConfig"):
         self.name = name
         self.model_config = model_config
-        self.num_weight_blocks = None
-        self.weight_block_size = None
-        self.feature_extractor = None
-        self.feature_extractor_class = None
-        self.transformer_io = None
-        self.transformer = None
+        self.num_weight_blocks: Optional[int] = None
+        self.weight_block_size: Optional[int] = None
+        self.feature_extractor: Optional[nn.Module] = None
+        self.feature_extractor_class: Optional[Callable[..., nn.Module]] = None
+        self.transformer_io: Optional[Union[
+            util.JointTransformerIO,
+            util.SeparateTransformerIO,
+        ]] = None
+        self.transformer: Optional[Union[
+            transformer.EncoderDecoderModel,
+            transformer.EncoderModel,
+            transformer.SeparateEncoderDecoderModel,
+        ]] = None
 
     def _setup(self):
         raise NotImplementedError
 
-    def set_weight_params(self, num_weight_blocks, weight_block_size):
+    def set_weight_params(self, num_weight_blocks: int, weight_block_size: int):
         self.num_weight_blocks = num_weight_blocks
         self.weight_block_size = weight_block_size
 
-    def set_feature_extractor_class(self, feature_extractor_class):
+    def set_feature_extractor_class(
+        self,
+        feature_extractor_class: Callable[..., nn.Module],
+    ) -> None:
         self.feature_extractor_class = feature_extractor_class
 
     def _make_feature_extractor(self):
@@ -122,21 +144,26 @@ class Generator:
                 name="feature_extractor"
             )
 
-    def _features(self, input_tensor, shared_features=None, enable_fe_dropout=False):
+    def _features(
+        self,
+        input_tensor: torch.Tensor,
+        shared_features: Optional[torch.Tensor] = None,
+        enable_fe_dropout: bool = False
+    ) -> torch.Tensor:
         """Returns full feature vector (per-layer and shared if specified)."""
         if self.feature_extractor is not None:
             # feature_extractor -> Activation Feature Extractor
             # shared_features   -> Image Feature Extractor
             features = self.feature_extractor(input_tensor)
             if enable_fe_dropout and self.model_config.fe_dropout > 0.0:
-                dropout = tf.layers.Dropout(rate=self.model_config.fe_dropout)
+                dropout = nn.Dropout(p=self.model_config.fe_dropout)
                 features = dropout(features, training=True)
         else:
             features = None
 
         if shared_features is not None:
             if features is not None:
-                return tf.concat([features, shared_features], axis=-1)
+                return torch.concat([features, shared_features], dim=-1)
             return shared_features
 
         if features is None:
@@ -147,11 +174,18 @@ class Generator:
         return features
 
 
-class JointGenerator(Generator):
+class JointGenerator(_Generator):
     """Model that feeds the Encoder/Decoder concatenated samples and weights."""
 
-    def _pad_features(self, features):
-        """Pads features to fit the embedding size."""
+    def _pad_features(self, features: torch.Tensor) -> Tuple[torch.Tensor, int]:
+        """Pads features to fit the embedding size.
+
+        [batch_size, feature_dim]
+            ↓
+        [batch_size, feature_dim + pad_size]
+        """
+        assert isinstance(self.transformer_io, util.JointTransformerIO)
+
         feature_size = int(features.shape[1])
         embedding_dim = self.transformer_io.embedding_dim
         input_embedding_size = feature_size + embedding_dim
@@ -160,7 +194,8 @@ class JointGenerator(Generator):
             raise RuntimeError("weight_block_size must be set before calling _pad_features()")
 
         embedding_size = max(
-            embedding_dim + self.weight_block_size, input_embedding_size
+            embedding_dim + self.weight_block_size,
+            input_embedding_size,
         )
         if embedding_size == input_embedding_size:
             return features, embedding_size
@@ -194,8 +229,8 @@ class JointGenerator(Generator):
                 [4, 5, 6, 0, 0],   # original sample 1
                 [0, 0, 0, 0, 0]]   # padded batch (after)
             """
-            paddings = tf.constant([[0, 0], [0, pad_size]])
-            return tf.pad(features, paddings, "CONSTANT"), embedding_size
+            padded_features = F.pad(features, (0, pad_size), mode='constant', value=0)
+            return padded_features, embedding_size
 
     def get_transformer_params(self, embedding_size: int):
         """Returns Transformer parameters."""
@@ -227,56 +262,55 @@ class JointGenerator(Generator):
         )
 
     def _setup(self):
-        with tf.variable_scope(self.name + "_setup"):
-            self._make_feature_extractor()
+        self._make_feature_extractor()
 
-            assert self.num_weight_blocks
-            assert self.weight_block_size
-            self.transformer_io = util.JointTransformerIO(
-                num_labels=self.model_config.num_labels,
-                num_weights=self.num_weight_blocks,
-                embedding_dim=self.model_config.embedding_dim,
-                weight_block_size=self.weight_block_size,
-            )
+        assert self.num_weight_blocks
+        assert self.weight_block_size
+        self.transformer_io = util.JointTransformerIO(
+            num_labels=self.model_config.num_labels,
+            num_weights=self.num_weight_blocks,
+            embedding_dim=self.model_config.embedding_dim,
+            weight_block_size=self.weight_block_size,
+        )
 
     def generate_weights(
         self,
-        input_tensor,
-        labels,
-        mask=None,
-        shared_features=None,
-        enable_fe_dropout=False,
-    ):
+        input_tensor: torch.Tensor,
+        labels: torch.Tensor,
+        mask: Optional[torch.Tensor] = None,
+        shared_features: Optional[torch.Tensor] = None,
+        enable_fe_dropout: bool = False,
+    ) -> list[torch.Tensor]:
         """Generates weights from the inputs."""
         if self.transformer_io is None:
             self._setup()
 
-        with tf.variable_scope(f"builder_{self.name}"):
-            features = self._features(
-                input_tensor, shared_features, enable_fe_dropout=enable_fe_dropout
+        assert isinstance(self.transformer_io, util.JointTransformerIO)
+
+        features = self._features(
+            input_tensor, shared_features, enable_fe_dropout=enable_fe_dropout
+        )
+        features, transformer_embedding_size = self._pad_features(features)
+
+        if self.transformer is None:
+            if self.model_config.use_decoder:
+                model_class = transformer.EncoderDecoderModel
+            else:
+                model_class = transformer.EncoderModel
+            self.transformer = model_class(
+                self.get_transformer_params(transformer_embedding_size),
+                skip_last_nonlinearity=self.model_config.skip_last_nonlinearity,
+                name="transformer",
             )
-            with tf.variable_scope("feature_padding"):
-                features, transformer_embedding_size = self._pad_features(features)
+        if mask is not None:
+            mask = self.transformer_io.extend_label_mask(mask)
+        transformer_input = self.transformer_io.encode_samples(features, labels)
+        transformer_output = self.transformer(transformer_input, mask=mask)
 
-            with tf.variable_scope("transformer"):
-                if self.transformer is None:
-                    if self.model_config.use_decoder:
-                        model = transformer.EncoderDecoderModel
-                    else:
-                        model = transformer.EncoderModel
-                    self.transformer = model(
-                        self.get_transformer_params(transformer_embedding_size),
-                        skip_last_nonlinearity=self.model_config.skip_last_nonlinearity,
-                        name="transformer",
-                    )
-                if mask is not None:
-                    mask = self.transformer_io.extend_label_mask(mask)
-                transformer_input = self.transformer_io.encode_samples(features, labels)
-                transformer_output = self.transformer(transformer_input, mask=mask)
-                return self.transformer_io.decode_weights(transformer_output)
+        return self.transformer_io.decode_weights(transformer_output)
 
 
-class SeparateGenerator(Generator):
+class SeparateGenerator(_Generator):
     """Model that feeds samples to Encoder and weights to Decoder."""
 
     def get_encoder_params(self, embedding_size: int):
@@ -324,19 +358,25 @@ class SeparateGenerator(Generator):
         )
 
     def _setup(self):
-        with tf.variable_scope(self.name + "_setup"):
-            self._make_feature_extractor()
+        self._make_feature_extractor()
 
-            assert self.num_weight_blocks
-            assert self.weight_block_size
-            self.transformer_io = util.SeparateTransformerIO(
-                num_labels=self.model_config.num_labels,
-                num_weights=self.num_weight_blocks,
-                embedding_dim=self.model_config.embedding_dim,
-                weight_block_size=self.weight_block_size,
-            )
+        assert self.num_weight_blocks
+        assert self.weight_block_size
+        self.transformer_io = util.SeparateTransformerIO(
+            num_labels=self.model_config.num_labels,
+            num_weights=self.num_weight_blocks,
+            embedding_dim=self.model_config.embedding_dim,
+            weight_block_size=self.weight_block_size,
+        )
 
-    def generate_weights(self, input_tensor, labels, mask=None, shared_features=None, enable_fe_dropout=False):
+    def generate_weights(
+        self,
+        input_tensor: torch.Tensor,
+        labels: torch.Tensor,
+        mask: Optional[torch.Tensor] = None,
+        shared_features: Optional[torch.Tensor] = None,
+        enable_fe_dropout: bool = False,
+    ) -> list[torch.Tensor]:
         """Generates weights from the inputs."""
         del mask
         if self.transformer_io is None:
@@ -349,26 +389,26 @@ class SeparateGenerator(Generator):
 
         assert self.weight_block_size is not None, \
         "weight_block_size must be set before calling _pad_features()"
+        assert isinstance(self.transformer_io, util.SeparateTransformerIO)
 
-        with tf.variable_scope(f"builder_{self.name}"):
-            features = self._features(input_tensor, shared_features, enable_fe_dropout)
-            weight_dim = self.transformer_io.weight_embedding_dim + self.weight_block_size
-            sample_dim = self.transformer_io.embedding_dim
-            sample_dim += int(features.shape[1])
+        features = self._features(input_tensor, shared_features, enable_fe_dropout)
+        weight_dim = self.transformer_io.weight_embedding_dim + self.weight_block_size
+        sample_dim = self.transformer_io.embedding_dim
+        sample_dim += int(features.shape[1])
 
-            with tf.variable_scope("transformer"):
-                if self.transformer is None:
-                    self.transformer = transformer.SeparateEncoderDecoderModel(
-                        encoder_params=self.get_encoder_params(sample_dim),
-                        decoder_params=self.get_decoder_params(weight_dim),
-                        skip_last_nonlinearity=self.model_config.skip_last_nonlinearity,
-                        name="transformer",
-                    )
-                decoded = self.transformer(
-                    self.transformer_io.encode_samples(features, labels),
-                    self.transformer_io.encode_weights(),
-                )
-                return self.transformer_io.decode_weights(decoded)
+        if self.transformer is None:
+            self.transformer = transformer.SeparateEncoderDecoderModel(
+                encoder_params=self.get_encoder_params(sample_dim),
+                decoder_params=self.get_decoder_params(weight_dim),
+                skip_last_nonlinearity=self.model_config.skip_last_nonlinearity,
+                name="transformer",
+            )
+        decoded = self.transformer(
+            self.transformer_io.encode_samples(features, labels),
+            self.transformer_io.encode_weights(),
+        )
+
+        return self.transformer_io.decode_weights(decoded)
 
 
 # ------------------------------------------------------------
@@ -386,8 +426,9 @@ class BaseCNNLayer(nn.Module):
         head_builder=None,
         var_reg_weight=None,
     ):
-        super().__init__(name=name)
+        super().__init__()
 
+        self.name = name
         self.model_config = model_config
         self.num_labels = model_config.num_labels
 
@@ -588,13 +629,15 @@ class ConvLayer(BaseCNNLayer):
 
     def _setup(self, inputs):
         """Input-specific setup."""
+        # inputs -> [NCHW]
         self.input_dim = int(inputs.shape[-1])
         if self.num_features is None:
             self.num_features = max(self.output_dim, self.input_dim)
         self._compute_weight_sizes(self.model_config.weight_allocation)
         feature_extractor_class = functools.partial(
             feature_extractors.SimpleConvFeatureExtractor,
-            input_size=int(inputs.shape[1]),
+            in_channels=inputs.shape[1],
+            input_size=int(inputs.shape[2]),
             feature_layers=self.feature_layers,
             feature_dim=self.num_features,
             kernel_size=self.kernel_size,
@@ -738,14 +781,16 @@ class LogitsLayer(BaseCNNLayer):
 
     def _setup(self, inputs):
         """Input-specific setup."""
+        # inputs -> [NCHW]
         self.input_dim = int(inputs.shape[-1])
 
         if self.num_features is None:
             self.num_features = self.input_dim
         feature_extractor_class = functools.partial(
             feature_extractors.SimpleConvFeatureExtractor,
+            in_channels=inputs.shape[1],
             feature_layers=1,
-            input_size=int(inputs.shape[1]),
+            input_size=int(inputs.shape[2]),
             feature_dim=self.num_features,
             nonlinear_feature=self.model_config.nonlinear_feature,
             kernel_size=self.fe_kernel_size,
@@ -823,6 +868,7 @@ class FlattenLogitsLayer(LogitsLayer):
         if self.model_config.logits_feature_extractor == "mix":
             feature_extractor_class = functools.partial(
                 feature_extractors.PassthroughFeatureExtractor,
+                name="feature_extractor",
                 wrap_class=feature_extractor_class,
             )
 
@@ -850,7 +896,7 @@ class FlattenLogitsLayer(LogitsLayer):
 class LayerwiseModel(common_ht.Model):
     """Model specification including layer builders."""
 
-    def __init__(self, layers: "list[ConvLayer | BaseCNNLayer]", model_config: LayerwiseModelConfig):
+    def __init__(self, layers: "Sequence[Union[ConvLayer, BaseCNNLayer]]", model_config: LayerwiseModelConfig):
         super().__init__()
 
         self.layers = layers

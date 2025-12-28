@@ -288,7 +288,7 @@ def make_dataset_unbalanced(
 def make_dataset_balanced(
     model_config: LayerwiseModelConfig,
     data_config: DatasetConfig,
-    shuffle_labels=True,
+    shuffle_labels: bool = True,
 ):
     """Creates data for Transformer and CNN.
 
@@ -346,7 +346,8 @@ def make_dataset(
 ):
     """Makes dataset given dataset and model configuration."""
     augment = functools.partial(
-        datasets.augment_images, augment_individually=data_config.augment_individually
+        datasets.augment_images,
+        augment_individually=data_config.augment_individually,
     )
 
     if data_config.balanced_batches:
@@ -357,10 +358,12 @@ def make_dataset(
 
     output = dataset_maker(model_config=model_config, data_config=data_config, **kwargs)
     if data_config.apply_image_augmentations:
+        assert model_config.image_size is not None
         image_size = model_config.image_size
         output = dataclasses.replace(
             output,
             transformer_images=augment(output.transformer_images, image_size),
             cnn_images=augment(output.cnn_images, image_size),
         )
+
     return output, dataset_state
