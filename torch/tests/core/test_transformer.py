@@ -89,7 +89,7 @@ def test_pwfeedforward(
     [True, False],
 )
 @pytest.mark.parametrize(
-    "d_model, mha_output_dim",
+    "d_model,mha_output_dim",
     [
         (128, 128),
         (256, 256),
@@ -158,7 +158,7 @@ def test_multi_head_attention_shapes(
     ],
 )
 @pytest.mark.parametrize(
-    "d_model, mha_output_dim",
+    "d_model,mha_output_dim",
     [
         (128, 128),
         (256, 256),
@@ -396,7 +396,7 @@ def test_encodermodel(
 
 
 @pytest.mark.parametrize(
-    "batch_size, seq_len",
+    "batch_size,seq_len",
     [
         (2, 8), # [batch_size, seq_len, hidden_dim] ← Normal conditions
         (None, 8), # [seq_len, hidden_dim] ← NO batch dimension

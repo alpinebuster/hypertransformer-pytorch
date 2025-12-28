@@ -14,7 +14,6 @@ from torch.utils.tensorboard import SummaryWriter
 
 from hypertransformer.core import transformer
 
-
 TransformerParamsFn = Callable[[int], transformer.TransformerParams]
 
 
@@ -145,6 +144,9 @@ class _TransformerIO(nn.Module):
             num_embeddings=num_labels + 1,
             embedding_dim=embedding_dim,
         )
+        # TensorFlow defaults to a normal distribution with stddev=1.0, while PyTorch defaults to a uniform distribution for nn.Embedding initialization
+        nn.init.normal_(self.label_embs.weight, mean=0.0, std=1.0)
+
         # Weight embeddings are independent parameters (not an embedding table)
         self.weight_embs: nn.ParameterList = nn.ParameterList(
             [
@@ -152,6 +154,8 @@ class _TransformerIO(nn.Module):
                 for _ in range(num_weights)
             ]
         )
+        for p in self.weight_embs:
+            nn.init.normal_(p, mean=0.0, std=1.0)
 
     def _encode_labels(self, labels: torch.Tensor) -> torch.Tensor:
         """Generates label encodings.
@@ -189,7 +193,7 @@ class SimpleTransformerIO(_TransformerIO):
         """Generates Transformer inputs from input samples.
 
         Args:
-           images: FloatTensor [batch, ...]
+           images: FloatTensor [batch, image_size, image_size, channels]
            labels: LongTensor  [batch]
 
         Returns: 
@@ -297,17 +301,17 @@ class JointTransformerIO(_TransformerIO):
 
         Returns:
            sequence: FloatTensor [num_weights + B, D_w + I_l]
-        """
-        # -------- sample --------
+        """        
+        # -------- Sample --------
         batch_size: int = images.shape[0]
         # Flatten image features
-        #                                              I_l
+        #                                                   I_l
         images_flat: torch.Tensor = images.view(batch_size, -1)
         encoded_labels: torch.Tensor = self._encode_labels(labels)
         # [B, D_l + I_l]
-        sequence: torch.Tensor = torch.concat([encoded_labels, images], dim=-1)
+        sequence: torch.Tensor = torch.concat([encoded_labels, images_flat], dim=-1)
 
-        # -------- weight --------
+        # -------- Weight --------
         weight_sequence: Union[list[torch.Tensor], torch.Tensor] = []
         image_dim: int = images_flat.shape[1]
         for i in range(self.num_weights):
@@ -320,14 +324,12 @@ class JointTransformerIO(_TransformerIO):
 
             weight_token: torch.Tensor = torch.cat([weight_emb, zero_emb], dim=-1)
             weight_sequence.append(weight_token)
-
         # [num_weights, D_w + I_l]
         weight_sequence = torch.stack(weight_sequence, dim=0)
+
         # Concatenate weight tokens before sample tokens
         # [num_weights + B, D_w + I_l]
-        sequence = torch.cat([weight_sequence, sequence], dim=0)
-
-        return sequence
+        return torch.cat([weight_sequence, sequence], dim=0)
 
     def extend_label_mask(self, label_mask: torch.Tensor) -> torch.Tensor:
         """
