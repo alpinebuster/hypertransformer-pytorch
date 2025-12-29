@@ -52,21 +52,6 @@ class TrainConfig:
     large_summaries_every: int = 500
 
 
-def get_default_summary_writer(dump_graph=True, suffix="train"):
-    """Creates summary writers."""
-    train_writer = util.MultiFileWriter(
-        os.path.join(FLAGS.train_log_dir, suffix),
-        graph=tf.get_default_graph() if dump_graph else None,
-    )
-    return train_writer
-
-
-def get_default_saver():
-    return tf.train.Saver(
-        keep_checkpoint_every_n_hours=KEEP_CHECKPOINT_EVERY_N_HOURS, max_to_keep=3
-    )
-
-
 @dataclasses.dataclass
 class TrainState:
     """Model state."""
@@ -135,7 +120,7 @@ def _is_not_empty(tensor):
         return True
     return (
         tensor is not None and len(tensor) > 0
-    )  # pylint: disable=g-explicit-length-test
+    )
 
 
 def train(train_config: TrainConfig, state: TrainState, run_options=None) -> None:

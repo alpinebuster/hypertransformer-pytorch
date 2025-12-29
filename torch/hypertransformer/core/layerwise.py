@@ -647,7 +647,7 @@ class ConvLayer(BaseCNNLayer):
         )
         self.generator.set_feature_extractor_class(feature_extractor_class)
 
-    def __call__(self, inputs, training=True):
+    def forward(self, inputs, training=True):
         # Layers should be created in `__call__` to properly build weights from
         # Transformer outputs for both training and evaluation.
         self.conv = tf.layers.Conv2D(
