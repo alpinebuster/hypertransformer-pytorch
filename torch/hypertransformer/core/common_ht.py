@@ -4,7 +4,7 @@ import dataclasses
 import enum
 import functools
 
-from typing import TYPE_CHECKING, List, Optional, Callable
+from typing import TYPE_CHECKING, Optional, Callable
 
 import torch
 import torch.nn.functional as F
@@ -53,7 +53,7 @@ class DatasetConfig:
 
     # Dataset information
     dataset_name: str
-    use_label_subset: Optional[List[int]] = None
+    use_label_subset: Optional[list[int]] = None
     ds_split: str = "train"
     meta_dataset_split: str = "train"
     data_dir: Optional[str] = None

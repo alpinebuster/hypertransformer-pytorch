@@ -4,7 +4,7 @@ import dataclasses
 import os
 import time
 
-from typing import Any, Callable, Dict, List, Optional, Text, Union
+from typing import Any, Callable, Dict, Optional, Text, Union
 
 from absl import flags
 from absl import logging
@@ -59,10 +59,10 @@ class TrainState:
     init_op: Optional[tf.Operation] = None
     step_initializer: Optional[tf.Operation] = None
     update_op: tf.Operation = field(default_factory=tf.no_op)
-    small_summaries: Union[List[Any], Dict[Text, List[Any]], None] = field(
+    small_summaries: Union[list[Any], Dict[Text, list[Any]], None] = field(
         default_factory=list
     )
-    large_summaries: Union[List[Any], Dict[Text, List[Any]], None] = field(
+    large_summaries: Union[list[Any], Dict[Text, list[Any]], None] = field(
         default_factory=list
     )
 

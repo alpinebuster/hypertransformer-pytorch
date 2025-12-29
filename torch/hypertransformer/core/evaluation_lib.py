@@ -3,7 +3,7 @@
 import copy
 
 import dataclasses
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -30,10 +30,10 @@ TrainSamples = Tuple[tf.Tensor, tf.Tensor, Optional[tf.Operation]]
 # (a) a dictionary mapping a task number to a list of accuracies for all
 #     batches;
 # (b) a list of mean accuracies for all tasks.
-Accuracies = Tuple[Dict[int, List[float]], List[float]]
+Accuracies = Tuple[Dict[int, list[float]], list[float]]
 
 # Either a list of tf.Variables or a function that returns such a list.
-VarList = Union[List[tf.Variable], Callable[..., List[tf.Variable]]]
+VarList = Union[list[tf.Variable], Callable[..., list[tf.Variable]]]
 
 
 @dataclasses.dataclass
@@ -46,7 +46,7 @@ class EvaluationConfig:
 def dataset_with_custom_labels(
     model_config: common_ht.LayerwiseModelConfig,
     dataset_config: common_ht.DatasetConfig,
-) -> tuple[common_ht.DatasetSamples, Optional[List[int]]]:
+) -> tuple[common_ht.DatasetSamples, Optional[list[int]]]:
     """Returns a dataset with a controlled label set (should be reshuffled)."""
     custom_labels = copy.copy(dataset_config.use_label_subset)
     dataset_config = dataclasses.replace(

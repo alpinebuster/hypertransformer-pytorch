@@ -4,7 +4,7 @@ import dataclasses
 import functools
 import math
 
-from typing import Callable, Dict, List, Optional, Union, Sequence, \
+from typing import Callable, Dict, Optional, Union, Sequence, \
     Tuple
 
 import torch
@@ -29,8 +29,8 @@ HeadBuilder = Callable[..., "BaseCNNLayer"]
 
 @dataclasses.dataclass
 class GeneratedWeights:
-    weight_blocks: List[List[torch.Tensor]]
-    head_weight_blocks: Dict[str, List[torch.Tensor]]
+    weight_blocks: list[list[torch.Tensor]]
+    head_weight_blocks: Dict[str, list[torch.Tensor]]
     shared_features: Optional[torch.Tensor] = None
 
 

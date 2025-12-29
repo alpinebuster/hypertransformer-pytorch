@@ -3,24 +3,38 @@
 import dataclasses
 import functools
 
-from typing import Any, Callable, Dict, Generator, List, \
+from typing import Any, Callable, Dict, Generator, \
     Optional, Tuple, Union, Mapping
 
 import numpy as np
 import torch
+import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from torchvision.ops import roi_align
-import torchvision.transforms.functional as TV_F
+import torchvision.transforms as T
+import torchvision.transforms.functional as TF
 
 from hypertransformer.core import common_ht
 
 DatasetInfo = common_ht.DatasetInfo
 
-UseLabelSubset = Union[List[int], Callable[[], List[int]]]
+UseLabelSubset = Union[list[int], Callable[[], list[int]]]
 LabelGenerator = Generator[Tuple[int|np.ndarray, int], None, None]
-SupervisedSamples = Tuple[List[np.ndarray], List[np.ndarray], List[np.ndarray]]
-SupervisedSample = Tuple[np.ndarray, np.ndarray, np.ndarray]
-DSBatch = Tuple[torch.Tensor, torch.Tensor]
+SupervisedSamples = Tuple[
+    list[torch.Tensor],
+    list[torch.Tensor],
+    list[torch.Tensor],
+]
+SupervisedSamplesNumpy = Tuple[
+    list[np.ndarray],
+    list[np.ndarray],
+    list[np.ndarray],
+]
+SupervisedSample = Tuple[
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+]
 
 
 # Range of the random alpha value controlling contrast enhancement augmentation.
@@ -95,7 +109,7 @@ def _get_random_bounding_box(
 def _crop_and_resize(
     images: torch.Tensor, # (C, H, W) or (N, C, H, W)
     bboxes: torch.Tensor, # (N, 4) -> Normalized (y1, x1, y2, x2)
-    target_size: Union[int, Tuple[int, int], List[int]],
+    target_size: Union[int, Tuple[int, int], list[int]],
     methods: Union[str, Callable] = "BILINEAR",
 ) -> torch.Tensor:
     """Does crop and resize given normalized boxes.
@@ -158,7 +172,7 @@ def _crop_and_resize(
 
 def _random_crop_and_resize(
     images: torch.Tensor,
-    target_size: Union[int, Tuple[int, int], List[int]],
+    target_size: Union[int, Tuple[int, int], list[int]],
     min_crop_fraction: float = 0.5,
     crop_size: Optional[float] = None,
     methods: Union[str, Callable] = "BILINEAR",
@@ -210,15 +224,15 @@ def augment_images(
 
     def _augment(image_tensor: torch.Tensor) -> torch.Tensor:
         # image_tensor: (C, H, W) or (B, C, H, W)
-        out = TV_F.hflip(image_tensor) if torch.rand(()) < 0.5 else image_tensor
+        out = TF.hflip(image_tensor) if torch.rand(()) < 0.5 else image_tensor
         # hue_factor=`2*torch.rand(())-1` ∈ [-1, 1) -> [-hue_delta, +hue_delta]
-        out = TV_F.adjust_hue(out, hue_factor=hue_delta * (2*torch.rand(size=()).item() - 1))
+        out = TF.adjust_hue(out, hue_factor=hue_delta * (2*torch.rand(size=()).item() - 1))
         # brightness_factor ∈ [1 - brightness_delta, 1 + brightness_delta]
-        out = TV_F.adjust_brightness(
+        out = TF.adjust_brightness(
             out, brightness_factor=1.0 + brightness_delta * (2*torch.rand(size=()).item() - 1)
         )
         # contrast_factor ∈ [contrast[0], contrast[1]]
-        out = TV_F.adjust_contrast(
+        out = TF.adjust_contrast(
             out,
             contrast_factor=contrast[0] + (contrast[1] - contrast[0])*torch.rand(size=()).item(),
         )
@@ -283,322 +297,106 @@ class RandomizedAugmentationConfig:
     roll_range: float = 0.3
     rotate_by_90: bool = False
 
+class _RandomRoll(nn.Module):
+    def __init__(self, prob=0.0, roll_range=0.3):
+        super().__init__()
+        self.prob = prob
+        self.roll_range = roll_range
 
-class _RandomValue:
-    """Random value."""
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if torch.rand(size=[1]) > self.prob:
+            return x
 
-    value: Optional[tf.Variable] = None
-
-    def create(self, name, dtype=tf.bool):
-        """Create a random value of a given type."""
-        if self.value is None:
-            self.value = tf.get_variable(name, shape=(), dtype=dtype, trainable=False)
-
-    def _random_bool(self, prob):
-        return tf.math.less(tf.random.uniform(shape=(), maxval=1.0), prob)
-
-    def assign_bool(self, prob):
-        """Operator assigning a random boolean value to `value`."""
-        return tf.assign(self.value, self._random_bool(prob))
-
-    def assign_uniform(self, scale):
-        """Operator assigning a random uniform value to `value`."""
-        rand = tf.random.uniform(shape=(), minval=-1.0, maxval=1.0) * scale
-        return tf.assign(self.value, rand)
+        _, h, w = x.shape
+        dx = int((torch.rand(1)*2 - 1) * self.roll_range * h)
+        dy = int((torch.rand(1)*2 - 1) * self.roll_range * w)
+        return torch.roll(x, shifts=(dx, dy), dims=(1, 2))
 
 @dataclasses.dataclass
 class AugmentationConfig:
     """Configuration of the image augmentation generator."""
 
-    random_config: Optional[RandomizedAugmentationConfig] = None
+    def __init__(self, random_config: RandomizedAugmentationConfig):
+        self.random_config = random_config
+        self.transform = self._build_transform()
 
-    rotate:   _RandomValue = dataclasses.field(default_factory=_RandomValue)
-    smooth:   _RandomValue = dataclasses.field(default_factory=_RandomValue)
-    contrast: _RandomValue = dataclasses.field(default_factory=_RandomValue)
-    negate:   _RandomValue = dataclasses.field(default_factory=_RandomValue)
-    roll:     _RandomValue = dataclasses.field(default_factory=_RandomValue)
-    resize:   _RandomValue = dataclasses.field(default_factory=_RandomValue)
-    angle:    _RandomValue = dataclasses.field(default_factory=_RandomValue)
-    alpha:    _RandomValue = dataclasses.field(default_factory=_RandomValue)
-    size:     _RandomValue = dataclasses.field(default_factory=_RandomValue)
-    roll_x:   _RandomValue = dataclasses.field(default_factory=_RandomValue)
-    roll_y:   _RandomValue = dataclasses.field(default_factory=_RandomValue)
-    rotate_90_times: _RandomValue = dataclasses.field(default_factory=_RandomValue)
+    def _build_transform(self) -> T.Compose:
+        cfg = self.random_config
+        transforms: list[Callable[[torch.Tensor], torch.Tensor]] = []
 
-    children: List["AugmentationConfig"] = dataclasses.field(default_factory=list)
+        if cfg.rotate_by_90:
+            transforms.append(
+                T.RandomRotation([0, 90, 180, 270])
+            )
 
-    def __post_init__(self):
-        if self.children:
-            return
+        if cfg.rotation_probability > 0:
+            transforms.append(
+                T.RandomApply(
+                    [T.RandomRotation(cfg.angle_range)],
+                    p=cfg.rotation_probability,
+                )
+            )
 
-        for name in ["rotate", "smooth", "contrast", "negate", "resize", "roll"]:
-            getattr(self, name).create(name)
-        for name in [
-            "angle",
-            "alpha",
-            "size",
-            "roll_x",
-            "roll_y",
-            "rotate_90_times",
-        ]:
-            getattr(self, name).create(name, tf.float32)
+        if cfg.smooth_probability > 0:
+            transforms.append(
+                T.RandomApply(
+                    [T.GaussianBlur(kernel_size=3)],
+                    p=cfg.smooth_probability,
+                )
+            )
 
-    def randomize_op(self):
-        """Randomizes the augmentation according to the `random_config`."""
-        if self.children:
-            return tf.group([child.randomize_op() for child in self.children])
-        if self.random_config is None:
-            return tf.no_op()
+        if cfg.contrast_probability > 0:
+            transforms.append(
+                T.RandomApply(
+                    [T.ColorJitter(contrast=0.5)],
+                    p=cfg.contrast_probability,
+                )
+            )
 
-        config = self.random_config
-        assign_rotate = self.rotate.assign_bool(config.rotation_probability)
-        assign_smooth = self.smooth.assign_bool(config.smooth_probability)
-        assign_contrast = self.contrast.assign_bool(config.contrast_probability)
-        assign_negate = self.negate.assign_bool(config.negate_probability)
-        assign_resize = self.resize.assign_bool(config.resize_probability)
-        assign_roll = self.roll.assign_bool(config.roll_probability)
-        angle_range = config.angle_range / 180.0 * np.pi
-        assign_angle = self.angle.assign_uniform(scale=angle_range)
-        assign_size = self.size.assign_uniform(scale=1.0)
-        assign_alpha = self.alpha.assign_uniform(scale=1.0)
-        assign_roll_x = self.roll_x.assign_uniform(scale=config.roll_range)
-        assign_roll_y = self.roll_y.assign_uniform(scale=config.roll_range)
-        assign_rotate_90 = self.rotate_90_times.assign_uniform(scale=2.0)
-        return tf.group(
-            assign_rotate,
-            assign_smooth,
-            assign_contrast,
-            assign_angle,
-            assign_negate,
-            assign_resize,
-            assign_alpha,
-            assign_size,
-            assign_roll,
-            assign_roll_x,
-            assign_roll_y,
-            assign_rotate_90,
-        )
+        if cfg.resize_probability > 0:
+            transforms.append(
+                T.RandomApply(
+                    [T.RandomResizedCrop(size=None, scale=(0.7, 1.0))],
+                    p=cfg.resize_probability,
+                )
+            )
 
-    def _normalize(self, image):
-        v_min = tf.reduce_min(image, axis=(1, 2), keepdims=True)
-        v_max = tf.reduce_max(image, axis=(1, 2), keepdims=True)
-        return (image - v_min) / (v_max - v_min + 1e-7)
+        if cfg.negate_probability > 0:
+            transforms.append(
+                T.RandomApply(
+                    [T.RandomInvert(p=1.0)],
+                    p=cfg.negate_probability,
+                )
+            )
 
-    def _aug_contrast(self, image):
-        """Increases the image contrast."""
-        normalized = image / 128.0 - 1
-        v_mean = tf.reduce_mean(normalized, axis=(1, 2), keepdims=True)
-        mult, shift = (ALPHA_MAX - ALPHA_MIN) / 2, (ALPHA_MAX + ALPHA_MIN) / 2
-        alpha = mult * self.alpha.value + shift
-        output = tf.math.tanh((normalized - v_mean) * alpha) / alpha
-        output += v_mean
-        return 255.0 * self._normalize(output)
+        if cfg.roll_probability > 0:
+            transforms.append(
+                _RandomRoll(
+                    prob=cfg.roll_probability,
+                    roll_range=cfg.roll_range,
+                )
+            )
 
-    def _aug_smooth(self, images):
-        """Smooths the image using a 5x5 uniform kernel."""
-        depth = int(images.shape[-1])
-        image_filter = tf.eye(num_rows=depth, num_columns=depth, dtype=tf.float32)
-        image_filter = tf.stack([image_filter] * 3, axis=0)
-        image_filter = tf.stack([image_filter] * 3, axis=0)
-        output = tf.nn.conv2d(images, image_filter / 9.0, padding="SAME")
-        return 255.0 * self._normalize(output)
+        return T.Compose(transforms)
 
-    def _aug_roll(self, images):
-        """Smooths the image using a 5x5 uniform kernel."""
-        width, height = images.shape[1], images.shape[2]
-        width, height = tf.cast(width, tf.float32), tf.cast(height, tf.float32)
-        x = tf.cast(self.roll_x.value * width, tf.int32)
-        y = tf.cast(self.roll_y.value * height, tf.int32)
-        return tf.roll(images, [x, y], axis=[1, 2])
-
-    def _aug_negate(self, images):
-        """Negates the image."""
-        return 255.0 - images
-
-    def _aug_resize(self, images):
-        """Resizes the image."""
-        size = int(images.shape[1])
-        re_size = size * (1 - MAX_RESIZE / 2 + MAX_RESIZE * self.size.value / 2)
-        images = tf.image.resize(images, [re_size, re_size])
-        return tf.image.resize_with_crop_or_pad(images, size, size)
-
-    def _aug_rotate_90(self, images):
-        num_rotations = tf.cast(
-            tf.math.floor(self.rotate_90_times.value + 2.0), tf.int32
-        )
-        return tf.image.rot90(images, k=num_rotations)
-
-    def _aug_rotate(self, images, angles, fill_value=0.0):
+    def process(self, images: Union[torch.Tensor, np.ndarray]) -> torch.Tensor:
         """
-        images: Tensor, shape [B, H, W, C], dtype float32 (or castable)
-        angles: scalar Tensor (radians) or Tensor of shape [B], dtype float32
-        fill_value: scalar to use for pixels sampled outside source image
+        images: [B, C, H, W]
 
-        returns: rotated images, same shape as input
+        Return: 
+           [B, C, H, W]
         """
-        images = tf.cast(images, tf.float32)
-        shape = tf.shape(images)
-        batch = shape[0]
-        H = shape[1]
-        W = shape[2]
-        C = shape[3]
+        if isinstance(images, torch.Tensor):
+            imgs = images
+        else:
+            imgs = torch.from_numpy(images)
 
-        # Ensure angles is shape [B]
-        angles = tf.convert_to_tensor(angles, dtype=tf.float32)
-        angles = tf.reshape(angles, [-1])
-        angles = tf.cond(
-            tf.equal(tf.size(angles), 1),
-            lambda: tf.tile(angles, [batch]),
-            lambda: angles,
-        )
-        angles = tf.reshape(angles, [batch])
+        # BCHW
+        out = []
+        for img in imgs:
+            out.append(self.transform(img))
 
-        # Grid of (x, y) coordinates in the output image
-        x_lin = tf.cast(
-            tf.linspace(0.0, tf.cast(W, tf.float32) - 1.0, W), tf.float32
-        )  # [W]
-        y_lin = tf.cast(
-            tf.linspace(0.0, tf.cast(H, tf.float32) - 1.0, H), tf.float32
-        )  # [H]
-        x_t, y_t = tf.meshgrid(x_lin, y_lin)  # [H, W]
-        x_flat = tf.reshape(x_t, [-1])  # [HW]
-        y_flat = tf.reshape(y_t, [-1])  # [HW]
-        HW = tf.shape(x_flat)[0]
-
-        # Coordinates relative to image center
-        cx = (tf.cast(W, tf.float32) - 1.0) / 2.0
-        cy = (tf.cast(H, tf.float32) - 1.0) / 2.0
-        x_rel = x_flat - cx  # [HW]
-        y_rel = y_flat - cy  # [HW]
-
-        # Above line is to satisfy graph shape inference; replace with tile:
-        x_rel = tf.tile(tf.expand_dims(x_rel, 0), [batch, 1])  # [B, HW]
-        y_rel = tf.tile(tf.expand_dims(y_rel, 0), [batch, 1])  # [B, HW]
-
-        # cos & sin per-batch, shape [B,1]
-        cos_a = tf.reshape(tf.cos(angles), [batch, 1])
-        sin_a = tf.reshape(tf.sin(angles), [batch, 1])
-
-        # Inverse mapping: source_coord = R_{-theta} * (out_coord - center) + center
-        # R_{-theta} = [[cos, sin], [-sin, cos]]
-        x_src = cos_a * x_rel + sin_a * y_rel + cx  # [B, HW]
-        y_src = -sin_a * x_rel + cos_a * y_rel + cy  # [B, HW]
-
-        # Bilinear interpolation
-        x0 = tf.floor(x_src)
-        x1 = x0 + 1.0
-        y0 = tf.floor(y_src)
-        y1 = y0 + 1.0
-
-        x0_safe = tf.cast(x0, tf.int32)
-        x1_safe = tf.cast(x1, tf.int32)
-        y0_safe = tf.cast(y0, tf.int32)
-        y1_safe = tf.cast(y1, tf.int32)
-
-        x0_clipped = tf.clip_by_value(x0_safe, 0, W - 1)
-        x1_clipped = tf.clip_by_value(x1_safe, 0, W - 1)
-        y0_clipped = tf.clip_by_value(y0_safe, 0, H - 1)
-        y1_clipped = tf.clip_by_value(y1_safe, 0, H - 1)
-
-        # Weights
-        wa = (x1 - x_src) * (y1 - y_src)  # top-left
-        wb = (x1 - x_src) * (x_src - x0)  # bottom-left
-        wc = (x_src - x0) * (y1 - y_src)  # top-right
-        wd = (x_src - x0) * (x_src - x0)  # bottom-right
-
-        # Correct bilinear weights: (x1 - x)*(y1 - y), (x1 - x)*(y - y0), (x - x0)*(y1 - y), (x - x0)*(y - y0)
-        wa = (x1 - x_src) * (y1 - y_src)
-        wb = (x1 - x_src) * (y_src - y0)
-        wc = (x_src - x0) * (y1 - y_src)
-        wd = (x_src - x0) * (y_src - y0)
-
-        # Build indices for gather_nd: shape [B*HW, 3] where each row is [b, y, x]
-        batch_idx = tf.reshape(tf.range(batch, dtype=tf.int32), [batch, 1])  # [B,1]
-        batch_idx = tf.tile(batch_idx, [1, HW])  # [B, HW]
-
-        def gather_at(x_inds, y_inds):
-            # x_inds, y_inds: [B, HW] int32
-            idx = tf.stack(
-                [
-                    tf.reshape(batch_idx, [-1]),
-                    tf.reshape(y_inds, [-1]),
-                    tf.reshape(x_inds, [-1]),
-                ],
-                axis=1,
-            )  # [B*HW, 3]
-            vals = tf.gather_nd(images, idx)  # [B*HW, C]
-            vals = tf.reshape(vals, [batch, HW, C])  # [B, HW, C]
-            return vals
-
-        Ia = gather_at(x0_clipped, y0_clipped)  # top-left
-        Ib = gather_at(x0_clipped, y1_clipped)  # bottom-left
-        Ic = gather_at(x1_clipped, y0_clipped)  # top-right
-        Id = gather_at(x1_clipped, y1_clipped)  # bottom-right
-
-        # Weights shapes: [B, HW] -> make [B, HW, 1]
-        wa = tf.expand_dims(wa, -1)
-        wb = tf.expand_dims(wb, -1)
-        wc = tf.expand_dims(wc, -1)
-        wd = tf.expand_dims(wd, -1)
-
-        out = wa * Ia + wb * Ib + wc * Ic + wd * Id  # [B, HW, C]
-
-        # Mask for points that were outside original image bounds (so we can fill with fill_value)
-        inside_x = tf.logical_and(x_src >= 0.0, x_src <= tf.cast(W, tf.float32) - 1.0)
-        inside_y = tf.logical_and(y_src >= 0.0, y_src <= tf.cast(H, tf.float32) - 1.0)
-        inside = tf.cast(tf.logical_and(inside_x, inside_y), tf.float32)  # [B, HW]
-        inside = tf.expand_dims(inside, -1)  # [B, HW, 1]
-
-        out = out * inside + fill_value * (1.0 - inside)
-        out = tf.reshape(out, [batch, H, W, C])
-        return out
-
-    def process(self, images, index=None) -> np.ndarray:
-        """Processes a batch of samples."""
-        if index is not None:
-            return self.children[index].process(images)
-        config = self.random_config
-        if config is None:
-            raise ValueError("AugmentationConfig is undefined.")
-        if config.rotate_by_90:
-            images = self._aug_rotate_90(images)
-        if config.rotation_probability > 0.0:
-            images = tf.cond(
-                self.rotate.value,  # radian
-                lambda: self._aug_rotate(images, self.angle.value),
-                lambda: tf.identity(images),
-            )
-        if config.roll_probability > 0.0:
-            images = tf.cond(
-                self.roll.value,
-                lambda: self._aug_roll(images),
-                lambda: tf.identity(images),
-            )
-        if config.resize_probability > 0.0:
-            images = tf.cond(
-                self.resize.value,
-                lambda: self._aug_resize(images),
-                lambda: tf.identity(images),
-            )
-        if config.contrast_probability > 0.0:
-            images = tf.cond(
-                self.contrast.value,
-                lambda: self._aug_contrast(images),
-                lambda: tf.identity(images),
-            )
-        if config.smooth_probability > 0.0:
-            images = tf.cond(
-                self.smooth.value,
-                lambda: self._aug_smooth(images),
-                lambda: tf.identity(images),
-            )
-        if config.negate_probability > 0.0:
-            images = tf.cond(
-                self.negate.value,
-                lambda: self._aug_negate(images),
-                lambda: tf.identity(images),
-            )
-        return images
+        return torch.stack(out)
 
 
 @dataclasses.dataclass
@@ -650,7 +448,7 @@ class TaskGenerator:
         self,
         label_generator: Callable[[], LabelGenerator],
         unlabeled: int = 0,
-    ) -> SupervisedSamples:
+    ) -> SupervisedSamplesNumpy:
         """Produces labels and images from the label generator."""
         images, labels, classes = [], [], []
         consecutive_label = 0
@@ -673,7 +471,7 @@ class TaskGenerator:
         self,
         batch_sizes: list[int],
         num_unlabeled_per_class: list[int],
-    ) -> list[SupervisedSamples]:
+    ) -> list[SupervisedSamplesNumpy]:
         """Helper function for creating multiple semi-supervised samples."""
         output = []
         use_labels = self.use_labels
@@ -769,27 +567,23 @@ class TaskGenerator:
             classes = output[offs : offs + self.num_labels]
             offs += self.num_labels
 
+            images = [torch.from_numpy(img) for img in images]
+            labels = [torch.from_numpy(lbl) for lbl in labels]
+            classes = [torch.from_numpy(cla) for cla in classes]
             # Processing and combining in batches
-            if config.children:
-                images = [
-                    config.process(image_mat, idx)
-                    for idx, image_mat in enumerate(images)
-                ]
-            else:
-                images = [config.process(image_mat) for image_mat in images]
-
+            images = [config.process(image_mat) for image_mat in images]
             images_labels.append(
                 (
-                    np.concatenate(images, axis=0), # (batch_size, H, W)
-                    np.concatenate(labels, axis=0), # (batch_size,)
-                    np.concatenate(classes, axis=0), # (batch_size,)
+                    torch.cat(images, dim=0), # (batch_size, H, W)
+                    torch.cat(labels, dim=0), # (batch_size,)
+                    torch.cat(classes, dim=0), # (batch_size,)
                 )
             )
 
         # Shuffling each batch
         output_batches: list[SupervisedSamples] = []
         for images, labels, classes in images_labels:
-            perm = np.random.permutation(images.shape[0])
+            perm = torch.randperm(images.size(0), device=images.device)
             images = images[perm]
             labels = labels[perm]
             classes = classes[perm]
@@ -817,7 +611,7 @@ class TaskGenerator:
         images = config.process(images)
 
         # Shuffle -> Equal to: `tf.range + tf.random.shuffle + tf.gather`
-        perm = np.random.permutation(images.shape[0])
+        perm = torch.randperm(images.size(0), device=images.device)
         images = images[perm]
         labels = labels[perm]
         classes = classes[perm]
