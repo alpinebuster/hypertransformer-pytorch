@@ -8,9 +8,8 @@ from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-import torchvision.ops.roi_align as tv_ops
-import torchvision.transforms.functional as TVF
-import tree
+from torchvision.ops import roi_align
+import torchvision.transforms.functional as TV_F
 
 from hypertransformer.core import common_ht
 
@@ -36,13 +35,6 @@ LOWER_CONTRAST = 0.8
 UPPER_CONTRAST = 1.2
 MIN_CROP_FRACTION = 0.6
 
-_resize_methods = {
-    "NEAREST_NEIGHBOR": "nearest",
-    "nearest": "nearest",
-    "BILINEAR": "bilinear",
-    "bilinear": "bilinear",
-}
-
 
 def _get_random_bounding_box(
     hw: torch.Tensor,
@@ -51,7 +43,7 @@ def _get_random_bounding_box(
     new_height: Optional[Union[float, torch.Tensor]] = None,
     dtype: torch.dtype = torch.int32,
 ) -> torch.Tensor:
-    """Random bounding box with aspect_ratio and within (0,0,hw[:,0],hw[:,1]).
+    """Random bounding box with aspect_ratio and within (0, 0, hw[:,0], hw[:,1]).
 
     Args:
         hw: Tensor of shape (..., 2), last dimension is (height, width)
@@ -104,54 +96,62 @@ def _crop_and_resize(
     target_size: Union[int, Tuple[int, int], List[int]],
     methods: Union[str, Callable] = "BILINEAR",
 ) -> torch.Tensor:
-    """Does crop and resize given normalized boxes (y1, x1, y2, x2)."""
+    """Does crop and resize given normalized boxes.
+
+    Args:
+       images: (B, C, H, W) or (C, H, W)
+       bboxes: (B, 4) normalized [y1, x1, y2, x2]
+       target_size: int or (H, W)
+       methods: "bilinear" | "nearest" | (method1, method2)
+
+    Returns:
+       (B, C, target_H, target_W) or (C, target_H, target_W)
+    """
     bboxes = bboxes.float()
     if not isinstance(target_size, (tuple, list)):
         target_size = [target_size, target_size]
 
-
     squeeze = False
     if images.dim() == 3:
-        # (C,H,W) -> (1,C,H,W)
+        # (C,H,W) → (1,C,H,W)
         images = images.unsqueeze(0)
+        # bbox (4,) → (1,4)
         bboxes = bboxes.unsqueeze(0)
         squeeze = True
+    B, _, H, W = images.shape
 
-    if callable(methods):
-        out = methods(
-            images,
-            boxes=bboxes,
-            crop_size=target_size,
-        )
-    else:
-        # images: (N, C, H, W)
-        n, _, h, w = images.shape
+    # --- normalized → absolute ---
+    # roi_align format: (batch_idx, x1, y1, x2, y2) ∈ pixel coords
+    # [y1, x1, y2, x2] ∈ [0, 1] → (x, y) ∈ [0, W-1] × [0, H-1]
+    y1, x1, y2, x2 = bboxes.unbind(dim=-1)
+    x1 = x1 * (W-1)
+    x2 = x2 * (W-1)
+    y1 = y1 * (H-1)
+    y2 = y2 * (H-1)
 
-        # roi_align expects (batch_idx, x1, y1, x2, y2) in absolute coords
-        batch_idx = torch.arange(n, device=images.device).float().unsqueeze(1)
-        y1, x1, y2, x2 = bboxes.unbind(dim=-1)
+    # roi_align format: (batch_idx, x1, y1, x2, y2)
+    batch_idx = torch.arange(B, device=images.device, dtype=torch.float32)
+    rois = torch.stack([batch_idx, x1, y1, x2, y2], dim=1)
 
-        rois = torch.cat(
-            [
-                batch_idx,
-                x1 * w,
-                y1 * h,
-                x2 * w,
-                y2 * h,
-            ],
-            dim=1,
-        )
-
-        out = tv_ops.roi_align(
-            input=images,
-            boxes=rois,
-            output_size=target_size,
-            aligned=True,
+    # (num_rois, C, target_H, target_W)
+    out = roi_align( # type:ignore
+        input=images,
+        boxes=rois,
+        output_size=target_size,
+        spatial_scale=1.0,
+        sampling_ratio=-1,
+        aligned=True,
+    )
+    if methods == "nearest":
+        # roi_align only supports "bilinear"
+        out = torch.nn.functional.interpolate(
+            out, size=target_size, mode="nearest"
         )
 
+    # When `images.dim() == 3`
     if squeeze:
-        out = out[0]  # (C, H, W)
-
+        # (1, C, H, W) → (C, H, W)
+        out = out.squeeze(0)
     return out
 
 def _random_crop_and_resize(
@@ -208,15 +208,15 @@ def augment_images(
 
     def _augment(image_tensor: torch.Tensor) -> torch.Tensor:
         # image_tensor: (C, H, W) or (B, C, H, W)
-        out = TVF.hflip(image_tensor) if torch.rand(()) < 0.5 else image_tensor
+        out = TV_F.hflip(image_tensor) if torch.rand(()) < 0.5 else image_tensor
         # hue_factor=`2*torch.rand(())-1` ∈ [-1, 1) -> [-hue_delta, +hue_delta]
-        out = TVF.adjust_hue(out, hue_factor=hue_delta * (2*torch.rand(size=()).item() - 1))
+        out = TV_F.adjust_hue(out, hue_factor=hue_delta * (2*torch.rand(size=()).item() - 1))
         # brightness_factor ∈ [1 - brightness_delta, 1 + brightness_delta]
-        out = TVF.adjust_brightness(
+        out = TV_F.adjust_brightness(
             out, brightness_factor=1.0 + brightness_delta * (2*torch.rand(size=()).item() - 1)
         )
         # contrast_factor ∈ [contrast[0], contrast[1]]
-        out = TVF.adjust_contrast(
+        out = TV_F.adjust_contrast(
             out,
             contrast_factor=contrast[0] + (contrast[1] - contrast[0])*torch.rand(size=()).item(),
         )
