@@ -195,7 +195,6 @@ def test_encoder_layer(
     layer = EncoderLayer(params=params)
     output = layer(x, mask=mask)
 
-    # ---------- Assertions ----------
     assert isinstance(output, torch.Tensor)
     assert output.shape == (batch_size, seq_len, params.mha_output_dim)
 
@@ -279,7 +278,6 @@ def test_decoder_layer(
         padding_mask=padding_mask,
     )
 
-    # ---------- Assertions ----------
     assert isinstance(out, torch.Tensor)
     assert out.shape == (batch_size, seq_len, d_model)
 

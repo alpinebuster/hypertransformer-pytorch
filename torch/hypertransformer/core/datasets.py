@@ -3,11 +3,12 @@
 import dataclasses
 import functools
 
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Generator, List, \
+    Optional, Tuple, Union, Mapping
 
 import numpy as np
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 from torchvision.ops import roi_align
 import torchvision.transforms.functional as TV_F
 
@@ -16,8 +17,9 @@ from hypertransformer.core import common_ht
 DatasetInfo = common_ht.DatasetInfo
 
 UseLabelSubset = Union[List[int], Callable[[], List[int]]]
-LabelGenerator = Generator[Tuple[int, int], None, None]
+LabelGenerator = Generator[Tuple[int|np.ndarray, int], None, None]
 SupervisedSamples = Tuple[List[np.ndarray], List[np.ndarray], List[np.ndarray]]
+SupervisedSample = Tuple[np.ndarray, np.ndarray, np.ndarray]
 DSBatch = Tuple[torch.Tensor, torch.Tensor]
 
 
@@ -551,7 +553,7 @@ class AugmentationConfig:
         out = tf.reshape(out, [batch, H, W, C])
         return out
 
-    def process(self, images, index=None):
+    def process(self, images, index=None) -> np.ndarray:
         """Processes a batch of samples."""
         if index is not None:
             return self.children[index].process(images)
@@ -613,21 +615,11 @@ class TaskGenerator:
         self.data = data
         self.num_labels = num_labels
         self.always_same_labels = always_same_labels
+
         if use_label_subset is not None:
             self.use_labels: UseLabelSubset = use_label_subset
         else:
             self.use_labels: UseLabelSubset = list(self.data.keys())
-
-    def _labels_per_batch(self, batch_size: int) -> list[int]:
-        samples_per_label = batch_size // self.num_labels
-        labels_with_extra = batch_size % self.num_labels
-        output = []
-        for i in range(self.num_labels):
-            if i < labels_with_extra:
-                output.append(samples_per_label + 1)
-            else:
-                output.append(samples_per_label)
-        return output
 
     def sample_random_labels(
         self,
@@ -678,7 +670,9 @@ class TaskGenerator:
         return images, labels, classes
 
     def _make_semisupervised_samples(
-        self, batch_sizes: list[int], num_unlabeled_per_class: list[int]
+        self,
+        batch_sizes: list[int],
+        num_unlabeled_per_class: list[int],
     ) -> list[SupervisedSamples]:
         """Helper function for creating multiple semi-supervised samples."""
         output = []
@@ -736,41 +730,45 @@ class TaskGenerator:
         """Generator producing multiple separate balanced batches of data.
 
         Arguments:
-          batch_sizes: A list of batch sizes for all batches.
-          config: Augmentation configuration.
-          num_unlabeled_per_class: A list of integers indicating a number of
+           batch_sizes: A list of batch sizes for all batches.
+           config: Augmentation configuration.
+           num_unlabeled_per_class: A list of integers indicating a number of
             "unlabeled" samples per class for each batch.
 
         Returns:
-          A list of (images,labels) pairs produced for each output batch.
+           A list of (images,labels) pairs produced for each output batch.
+           [
+              (images_1, labels_1, classes_1),
+              (images_2, labels_2, classes_2),
+              ...
+           ]
         """
-        sup_sample = functools.partial(
-            self._make_semisupervised_batches,
-            num_unlabeled_per_class=num_unlabeled_per_class,
+        # Returned array is:
+        #   output = [
+        #       # batch 1
+        #       image_1, image_2, ..., image_num_labels,
+        #       label_1, label_2, ..., label_num_labels,
+        #       class_1, class_2, ..., class_num_labels,
+        #
+        #       # batch 2
+        #       image_1, ..., class_num_labels,
+        #       ...
+        #   ]
+        output = self._make_semisupervised_batches(
             batch_sizes=batch_sizes,
+            num_unlabeled_per_class=num_unlabeled_per_class,
         )
-        #                   [   |------------------------------------------batch 1--------------------------------|        , ...]
-        # Returned array is [image-1, ..., image-num_labels, label-1, ..., label-num_labels, class-1, ..., class-num_labels, ...]
-        types = [tf.float32] * self.num_labels
-        types += [tf.int32] * self.num_labels
-        types += [tf.int32] * self.num_labels
-        types = types * len(batch_sizes)
-        output = tf.py_func(sup_sample, [], types, stateful=True)
 
         images_labels = []
-        some_label = list(self.data.keys())[0]
         offs = 0
-        for batch_size in batch_sizes:
+        for _ in batch_sizes:
             images = output[offs : offs + self.num_labels]
             offs += self.num_labels
             labels = output[offs : offs + self.num_labels]
             offs += self.num_labels
             classes = output[offs : offs + self.num_labels]
             offs += self.num_labels
-            # Setting a proper shape for post-processing to work
-            samples_per_label = self._labels_per_batch(batch_size)
-            for image, num_samples in zip(images, samples_per_label):
-                image.set_shape([num_samples] + list(self.data[some_label][0].shape))
+
             # Processing and combining in batches
             if config.children:
                 images = [
@@ -779,111 +777,137 @@ class TaskGenerator:
                 ]
             else:
                 images = [config.process(image_mat) for image_mat in images]
+
             images_labels.append(
                 (
-                    tf.concat(images, axis=0),
-                    tf.concat(labels, axis=0),
-                    tf.concat(classes, axis=0),
+                    np.concatenate(images, axis=0), # (batch_size, H, W)
+                    np.concatenate(labels, axis=0), # (batch_size,)
+                    np.concatenate(classes, axis=0), # (batch_size,)
                 )
             )
 
         # Shuffling each batch
-        output: list[SupervisedSamples] = []
+        output_batches: list[SupervisedSamples] = []
         for images, labels, classes in images_labels:
-            indices = tf.range(start=0, limit=tf.shape(images)[0], dtype=tf.int32)
-            shuffled_indices = tf.random.shuffle(indices)
-            images = tf.gather(images, shuffled_indices)
-            labels = tf.gather(labels, shuffled_indices)
-            classes = tf.gather(classes, shuffled_indices)
-            output.append((images, labels, classes))
-        return output
+            perm = np.random.permutation(images.shape[0])
+            images = images[perm]
+            labels = labels[perm]
+            classes = classes[perm]
+            output_batches.append((images, labels, classes))
+
+        return output_batches
 
     def get_batch(
         self,
         batch_size: int,
         config: AugmentationConfig,
         num_unlabeled_per_class: int = 0,
-    ) -> SupervisedSamples:
+    ) -> SupervisedSample:
         """Generator producing a single batch of data (meta-train + meta-test)."""
         if num_unlabeled_per_class > 0:
             raise ValueError(
-                "Unlabeled samples are currently only supported in " "balanced inputs."
+                "Unlabeled samples are currently only supported in "
+                "balanced inputs."
             )
-        sup_sample = functools.partial(
-            self._make_supervised_batch, batch_size=batch_size
+
+        images, labels, classes = self._make_supervised_batch(
+            batch_size=batch_size
         )
-        images, labels, classes = tf.py_func(
-            sup_sample, [], (tf.float32, tf.int32, tf.int32), stateful=True
-        )
-        some_label = list(self.data.keys())[0]
-        # Setting a proper shape for post-processing to work
-        images.set_shape([batch_size] + list(self.data[some_label][0].shape))
+        # Augmentation
         images = config.process(images)
 
-        indices = tf.range(start=0, limit=tf.shape(images)[0], dtype=tf.int32)
-        shuffled_indices = tf.random.shuffle(indices)
-
-        images = tf.gather(images, shuffled_indices)
-        labels = tf.gather(labels, shuffled_indices)
-        classes = tf.gather(classes, shuffled_indices)
+        # Shuffle -> Equal to: `tf.range + tf.random.shuffle + tf.gather`
+        perm = np.random.permutation(images.shape[0])
+        images = images[perm]
+        labels = labels[perm]
+        classes = classes[perm]
 
         return images, labels, classes
 
 
 def make_numpy_data(
-    sess,
     ds: Dataset,
     batch_size: int,
     num_labels: int,
     samples_per_label: int,
-    image_key="image",
-    label_key="label",
-    transpose=True,
-    max_batches=None,
+    image_key: str = "image",
+    label_key: str = "label",
+    transpose: bool = True,
+    max_batches: Optional[int] = None,
 ) -> Dict[int, np.ndarray]:
     """Makes a label-to-samples dictionary from the TF dataset.
 
     Arguments:
-      sess: Initialized TF session.
-      ds: Torch dataset.
-      batch_size: batch size to use for processing data.
-      num_labels: total number of labels.
-      samples_per_label: number of samples per label to accumulate.
-      image_key: key of the image tensor.
-      label_key: key of the label tensor.
-      transpose: if True, the image is transposed (XY).
-      max_batches: if provided, we process no more than this number of batches.
-
-    Returns:
-      Dictionary mapping labels to tensors containing all samples.
-    """
-    data = tf.data.make_one_shot_iterator(ds.batch(batch_size)).get_next()
-
-    examples = {i: [] for i in range(num_labels)}
-    batch_index = 0
-    while True:
-        """
+       ds: PyTorch Dataset. Each item should be a mapping containing image and label entries.
         {
             "image": np.ndarray [B, H, W, C],
             "label": np.ndarray [B],
         }
-        """
-        value = sess.run(data)
-        samples = value[label_key].shape[0]
-        for index in range(samples):
-            label = int(value[label_key][index])
+       batch_size: Batch size used by DataLoader.
+       num_labels: Total number of labels.
+       samples_per_label: Number of samples per label to accumulate.
+       image_key: Key of the image tensor.
+       label_key: Key of the label tensor.
+       transpose: If True, the image is transposed (XY).
+       max_batches: If provided, we process no more than this number of batches.
+
+    Returns:
+       Dictionary mapping labels to tensors containing all samples (samples_per_label, H, W, C).
+    """
+    loader: DataLoader[Mapping[str, Any]] = DataLoader(
+        ds, batch_size=batch_size, shuffle=False
+    )
+    examples: Dict[int, list[np.ndarray]] = {
+        i: [] for i in range(num_labels)
+    }
+    batch_index: int = 0
+
+    for batch in loader:
+        batch_map: Mapping[str, Any] = batch
+        images = batch_map[image_key]
+        labels = batch_map[label_key]
+        # Convert to numpy if needed
+        if isinstance(images, torch.Tensor):
+            images = images.cpu().numpy()
+        if isinstance(labels, torch.Tensor):
+            labels = labels.cpu().numpy()
+        images_np: np.ndarray = images
+        labels_np: np.ndarray = labels
+
+        # Because the size of a Dataset is generally not an integer multiple of the batch size
+        samples: int = labels_np.shape[0]
+        for idx in range(samples):
+            label: int = int(labels_np[idx])
             if len(examples[label]) < samples_per_label:
-                examples[label].append(value[image_key][index])
-        # Checking if we accumulated enough.
-        min_examples = np.min([len(examples[key]) for key in examples])
+                examples[label].append(images_np[idx])
+
+        # Stop if enough samples per label are collected
+        min_examples: int = min(len(v) for v in examples.values())
         if min_examples >= samples_per_label:
             break
-        # Checking if we already processed too many batches.
+
         batch_index += 1
         if max_batches is not None and batch_index >= max_batches:
             break
 
-    examples = {k: np.stack(v, axis=0) for k, v in examples.items()}
+    """Stack samples per label
+
+    e.g.
+       {label0: [img0, img1, ...],
+        label1: [img0, img1, ...],}
+           ↓
+       {label0: np.ndarray [N, H, W, C],
+        label1: np.ndarray [N, H, W, C],}
+    """
+    stacked: Dict[int, np.ndarray] = {
+        k: np.stack(v, axis=0) for k, v in examples.items()
+    }
+
+    # Optional transpose: [N, H, W, C] -> [N, W, H, C]
     if transpose:
-        examples = {k: np.transpose(v, axes=[0, 2, 1, 3]) for k, v in examples.items()}
-    return examples
+        stacked = {
+            k: np.transpose(v, axes=(0, 2, 1, 3))
+            for k, v in stacked.items()
+        }
+
+    return stacked

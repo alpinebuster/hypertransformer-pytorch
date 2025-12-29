@@ -13,6 +13,7 @@
         "NCHW",
         "NHWC",
         "onnx",
-        "randn"
+        "randn",
+        "semisupervised"
     ]
 }

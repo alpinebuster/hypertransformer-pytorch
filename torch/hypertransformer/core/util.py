@@ -302,7 +302,7 @@ class JointTransformerIO(_TransformerIO):
         Returns:
            sequence: FloatTensor [num_weights + B, D_w + I_l]
         """        
-        # -------- Sample --------
+        # Sample
         batch_size: int = images.shape[0]
         # Flatten image features
         #                                                   I_l
@@ -311,7 +311,7 @@ class JointTransformerIO(_TransformerIO):
         # [B, D_l + I_l]
         sequence: torch.Tensor = torch.concat([encoded_labels, images_flat], dim=-1)
 
-        # -------- Weight --------
+        # Weight
         weight_sequence: Union[list[torch.Tensor], torch.Tensor] = []
         image_dim: int = images_flat.shape[1]
         for i in range(self.num_weights):
