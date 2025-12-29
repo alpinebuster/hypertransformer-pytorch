@@ -4,10 +4,13 @@ import dataclasses
 import os
 import time
 
-from typing import Any, Callable, Dict, Optional, Text, Union
+from typing import Any, Callable, Dict, Optional, Text, Union, \
+    TypedDict
+from typing_extensions import Annotated
 
 from absl import flags
 from absl import logging
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -24,6 +27,19 @@ NUM_OUTPUT_IMAGES = 4
 KEEP_CHECKPOINT_EVERY_N_HOURS = 3
 
 field = dataclasses.field
+
+
+class Sample(TypedDict):
+    image: Annotated[np.ndarray, "(H, W, C)"]
+    label: int | np.integer
+
+class Batch(TypedDict):
+    image: Annotated[torch.Tensor, "(B, H, W, C)"]
+    label: Annotated[torch.Tensor, "(B,)"]
+
+class BatchNumpy(TypedDict):
+    image: Annotated[np.ndarray, "(B, H, W, C)"]
+    label: Annotated[np.ndarray, "(B,)"]
 
 
 @dataclasses.dataclass

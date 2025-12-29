@@ -120,7 +120,6 @@ def _make_numpy_array(data_config: DatasetConfig, batch_size: int, sess=None) ->
     if output is None:
         assert dataset_info.num_samples_per_label is not None
         output = datasets.make_numpy_data(
-            sess,
             ds=ds,
             batch_size=batch_size,
             num_labels=dataset_info.num_labels,
@@ -317,7 +316,7 @@ def make_dataset_balanced(
     transformer_images, transformer_labels, transformer_classes = batches[0]
     cnn_images, cnn_labels, cnn_classes = batches[1]
 
-    # NHWC
+    # NCHW
     if len(transformer_images.shape) == 3:
         transformer_images = tf.expand_dims(transformer_images, axis=-1)
     if len(cnn_images.shape) == 3:

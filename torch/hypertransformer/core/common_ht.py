@@ -4,7 +4,7 @@ import dataclasses
 import enum
 import functools
 
-from typing import TYPE_CHECKING, Optional, Callable
+from typing import TYPE_CHECKING, Optional, Callable, Any
 
 import torch
 import torch.nn.functional as F
@@ -215,7 +215,7 @@ class DatasetSamples:
     cnn_images: torch.Tensor # Query set
     cnn_labels: torch.Tensor
     cnn_real_classes: Optional[torch.Tensor]
-    randomize_op: tf.Operation
+    randomize_op: Any
     transformer_masks: Optional[torch.Tensor] = None
     real_class_min: Optional[int] = None
     real_class_max: Optional[int] = None

@@ -312,6 +312,22 @@ class _RandomRoll(nn.Module):
         dy = int((torch.rand(1)*2 - 1) * self.roll_range * w)
         return torch.roll(x, shifts=(dx, dy), dims=(1, 2))
 
+class _RandomResizedCropSameSize(nn.Module):
+    def __init__(self, prob=0.0, scale=(0.7, 1.0)):
+        super().__init__()
+        self.prob = prob
+        self.scale = scale
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if torch.rand(1) > self.prob:
+            return x
+
+        _, h, w = x.shape
+        return T.RandomResizedCrop(
+            size=(h, w),
+            scale=self.scale,
+        )(x)
+
 @dataclasses.dataclass
 class AugmentationConfig:
     """Configuration of the image augmentation generator."""
@@ -355,9 +371,9 @@ class AugmentationConfig:
 
         if cfg.resize_probability > 0:
             transforms.append(
-                T.RandomApply(
-                    [T.RandomResizedCrop(size=None, scale=(0.7, 1.0))],
-                    p=cfg.resize_probability,
+                _RandomResizedCropSameSize(
+                    prob=cfg.resize_probability,
+                    scale=(0.7, 1.0),
                 )
             )
 
@@ -419,7 +435,7 @@ class TaskGenerator:
         else:
             self.use_labels: UseLabelSubset = list(self.data.keys())
 
-    def sample_random_labels(
+    def _sample_random_labels(
         self,
         labels: list[int],
         batch_size: int,
@@ -430,7 +446,7 @@ class TaskGenerator:
             same_labels = self.always_same_labels
 
         if same_labels:
-            chosen_labels = labels[: self.num_labels]
+            chosen_labels = labels[:self.num_labels]
         else:
             chosen_labels = np.random.choice(
                 labels, size=self.num_labels, replace=False
@@ -485,7 +501,10 @@ class TaskGenerator:
         for batch_size, unlabeled in zip(batch_sizes, num_unlabeled_per_class):
             # Using the same labelset in all batches.
             label_generator = functools.partial(
-                self.sample_random_labels, use_labels, batch_size, same_labels=True
+                self._sample_random_labels,
+                use_labels,
+                batch_size,
+                same_labels=True,
             )
             output.append(self._images_labels(label_generator, unlabeled))
 
@@ -607,6 +626,9 @@ class TaskGenerator:
         images, labels, classes = self._make_supervised_batch(
             batch_size=batch_size
         )
+        images = torch.from_numpy(images)
+        labels = torch.from_numpy(labels)
+        classes = torch.from_numpy(classes)
         # Augmentation
         images = config.process(images)
 
@@ -687,20 +709,22 @@ def make_numpy_data(
     """Stack samples per label
 
     e.g.
-       {label0: [img0, img1, ...],
-        label1: [img0, img1, ...],}
+       {label_0: [img0, img1, ...],
+        label_1: [img0, img1, ...],
+        ...}
            ↓
-       {label0: np.ndarray [N, H, W, C],
-        label1: np.ndarray [N, H, W, C],}
+       {label_0: np.ndarray [N, C, H, W],
+        label_1: np.ndarray [N, C, H, W],
+        ...}
     """
     stacked: Dict[int, np.ndarray] = {
         k: np.stack(v, axis=0) for k, v in examples.items()
     }
 
-    # Optional transpose: [N, H, W, C] -> [N, W, H, C]
+    # Optional transpose: [N, C, H, W] -> [N, C, W, H]
     if transpose:
         stacked = {
-            k: np.transpose(v, axes=(0, 2, 1, 3))
+            k: np.transpose(v, axes=(0, 1, 3, 2))
             for k, v in stacked.items()
         }
 
