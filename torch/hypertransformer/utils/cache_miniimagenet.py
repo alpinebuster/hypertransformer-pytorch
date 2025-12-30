@@ -4,7 +4,7 @@ import dataclasses
 import os
 import pickle
 
-from typing import Any, Dict
+from typing import Any
 
 from absl import app
 from absl import flags
@@ -21,7 +21,7 @@ OUTPUT_PATH = flags.DEFINE_string(
 
 @dataclasses.dataclass
 class Sources:
-    data: Dict[Any, Any] = dataclasses.field(default_factory=dict)
+    data: dict[Any, Any] = dataclasses.field(default_factory=dict)
 
 
 def pickle_path(root, split):

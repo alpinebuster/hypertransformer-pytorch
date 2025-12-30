@@ -3,7 +3,7 @@
 import copy
 
 import dataclasses
-from typing import Callable, Dict, Optional, Tuple, Union
+from typing import Callable, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -24,13 +24,13 @@ from hypertransformer.core import train_lib
 # (b) cached Transformer labels;
 # (c) operation updating Transformer image/label cache (or None if `same_batch`
 #     parameter is False).
-TrainSamples = Tuple[tf.Tensor, tf.Tensor, Optional[tf.Operation]]
+TrainSamples = Tuple[torch.Tensor, torch.Tensor, Optional[tf.Operation]]
 
 # Type returned by `evaluate_dataset`:
 # (a) a dictionary mapping a task number to a list of accuracies for all
 #     batches;
 # (b) a list of mean accuracies for all tasks.
-Accuracies = Tuple[Dict[int, list[float]], list[float]]
+Accuracies = Tuple[dict[int, list[float]], list[float]]
 
 # Either a list of tf.Variables or a function that returns such a list.
 VarList = Union[list[tf.Variable], Callable[..., list[tf.Variable]]]

@@ -4,7 +4,7 @@ import dataclasses
 import functools
 import math
 
-from typing import Callable, Dict, Optional, Union, Sequence, \
+from typing import Callable, Optional, Union, Sequence, \
     Tuple
 
 import torch
@@ -22,7 +22,7 @@ BETA_SCALE = 1.0
 GAMMA_BIAS = 0.0
 BETA_BIAS = 0.0
 
-models: Dict[str, Callable[..., "LayerwiseModel"]] = {}
+models: dict[str, Callable[..., "LayerwiseModel"]] = {}
 
 HeadBuilder = Callable[..., "BaseCNNLayer"]
 
@@ -30,7 +30,7 @@ HeadBuilder = Callable[..., "BaseCNNLayer"]
 @dataclasses.dataclass
 class GeneratedWeights:
     weight_blocks: list[list[torch.Tensor]]
-    head_weight_blocks: Dict[str, list[torch.Tensor]]
+    head_weight_blocks: dict[str, list[torch.Tensor]]
     shared_features: Optional[torch.Tensor] = None
 
 
@@ -47,12 +47,6 @@ def get_remove_probability(max_probability: float) -> torch.Tensor:
            tensor(0.6942)
     """
     return torch.rand(size=()) * max_probability
-
-
-def get_l2_regularizer(weight=None):
-    if weight is None or weight == 0.0:
-        return None
-    return tf.keras.regularizers.L2(l2=weight)
 
 
 def remove_some_samples(
@@ -157,7 +151,7 @@ class _Generator:
             features = self.feature_extractor(input_tensor)
             if enable_fe_dropout and self.model_config.fe_dropout > 0.0:
                 dropout = nn.Dropout(p=self.model_config.fe_dropout)
-                features = dropout(features, training=True)
+                features = dropout(features)
         else:
             features = None
 
@@ -416,6 +410,11 @@ class SeparateGenerator(_Generator):
 # ------------------------------------------------------------
 
 
+def _get_l2_regularizer(weight=None):
+    if weight is None or weight == 0.0:
+        return None
+    return tf.keras.regularizers.L2(l2=weight)
+
 class BaseCNNLayer(nn.Module):
     """Base CNN layer used in our models."""
 
@@ -423,8 +422,8 @@ class BaseCNNLayer(nn.Module):
         self,
         name: str,
         model_config: LayerwiseModelConfig,
-        head_builder=None,
-        var_reg_weight=None,
+        head_builder: Optional[Callable[..., "BaseCNNLayer"]] = None,
+        var_reg_weight: Optional[float] = None,
     ):
         super().__init__()
 
@@ -437,11 +436,12 @@ class BaseCNNLayer(nn.Module):
         self.var_reg_weight = var_reg_weight
 
         self.feature_extractor = None
-        self.head = None
+        self.head: Optional["BaseCNNLayer"] = None
 
         if head_builder is not None and self.model_config.train_heads:
             self.head = head_builder(
-                name="head_" + self.name, model_config=self.model_config
+                name="head_" + self.name,
+                model_config=self.model_config,
             )
 
         if model_config.generator == "joint":
@@ -456,25 +456,39 @@ class BaseCNNLayer(nn.Module):
         self.getter_dict = {}
         self.initialized = False
 
-    def _setup(self, inputs):
+    def _setup(self, inputs: torch.Tensor):
         """Input-dependent layer setup."""
         raise NotImplementedError
 
-    def __call__(self, inputs, training=True):
+    def forward(self, inputs: torch.Tensor, training: bool = True) -> torch.Tensor:
         raise NotImplementedError
 
-    def _var_getter(self, offsets, weights, shape, name):
+    def _var_getter(self, offsets: dict, weights: list[torch.Tensor], shape, name: str):
+        """
+        name = "conv/kernel"
+                │
+                ▼
+        cnn_var_getter(name)
+                │
+                ├── Tensor ──┐
+                │            ├─ (+ trainable residual)
+                │            └─ (+ regularization)
+                │
+                └── None ───▶ fallback_fn(name)
+                                │
+                                └─ nn.Parameter
+        """
         raise NotImplementedError
 
     def create(
         self,
-        input_tensor,
-        labels,
-        mask=None,
-        shared_features=None,
-        enable_fe_dropout=False,
-        generate_weights=False,
-    ):
+        input_tensor: torch.Tensor,
+        labels: torch.Tensor,
+        mask: Optional[torch.Tensor] = None,
+        shared_features: Optional[torch.Tensor] = None,
+        enable_fe_dropout: bool = False,
+        generate_weights: bool = False,
+    ) -> Optional[list[torch.Tensor]]:
         """Creates a layer using a feature extractor and a Transformer."""
         if not self.initialized:
             self._setup(input_tensor)
@@ -494,19 +508,24 @@ class BaseCNNLayer(nn.Module):
 
     def apply(
         self,
-        input_tensor,
-        weight_blocks,
+        input_tensor: torch.Tensor,
+        weight_blocks: list[torch.Tensor],
         *args,
-        evaluation=False,
-        separate_bn_variables=False,
+        evaluation: bool = False,
+        separate_bn_variables: bool = False,
         **kwargs,
     ):
         """Applies created layer to the input tensor.
 
         Attributes:
            Position parameters → *args → Keyword-only parameters → **kwargs
+
+        Child.apply(x)
+        → self(x)
+        → nn.Module.__call__(x)
+        → Child.forward(x)
         """
-        assert self.initialized
+        assert self.initialized, "Layer must be initialized with `self.create()` before apply"
 
         variable_getter = functools.partial(
             util.var_getter_wrapper,
@@ -515,15 +534,13 @@ class BaseCNNLayer(nn.Module):
             _getter_dict=self.getter_dict,
             _add_trainable_weights=self.model_config.add_trainable_weights,
             _var_reg_weight=self.var_reg_weight,
-            _kernel_regularizer=get_l2_regularizer(self.model_config.l2_reg_weight),
+            _kernel_regularizer=_get_l2_regularizer(self.model_config.l2_reg_weight),
             _evaluation=evaluation,
             _separate_bn=separate_bn_variables,
         )
-        with tf.variable_scope(
-            self.name, reuse=tf.AUTO_REUSE, custom_getter=variable_getter
-        ):
-            # Equal to call `self.__call__(...)`
-            return self(input_tensor, *args, **kwargs)
+
+        # Equal to call `self.__call__(...) or self.forward(...)`
+        return self(input_tensor, *args, **kwargs)
 
 
 # ------------------------------------------------------------
@@ -537,19 +554,19 @@ class ConvLayer(BaseCNNLayer):
     def __init__(
         self,
         name,
-        model_config,
+        model_config: "LayerwiseModelConfig",
         output_dim=None,
         kernel_size: Optional[int] = None,
         num_features=None,
         feature_layers=0,
-        padding="valid",
-        generate_bias=None,
-        generate_bn=None,
+        padding: str ="valid",
+        generate_bias: Optional[bool] = None,
+        generate_bn: Optional[bool] = None,
         stride=None,
         act_fn=None,
         act_after_bn=False,
         maxpool_size=None,
-        head_builder=None,
+        head_builder: Optional[Callable[..., "BaseCNNLayer"]] = None,
     ):
         super().__init__(
             name=name,
@@ -585,7 +602,10 @@ class ConvLayer(BaseCNNLayer):
         if self.feature_layers < 1:
             self.feature_layers = self.model_config.feature_layers
 
+        # PyTorch 1.10+ supports "same" / "valid"
+        assert padding in ("same", "valid")
         self.padding = padding
+
         self.input_dim = -1
         self.output_dim = output_dim
         self.stride = stride
@@ -593,7 +613,7 @@ class ConvLayer(BaseCNNLayer):
         self.initialized = False
         self.act_after_bn = act_after_bn
 
-    def _compute_weight_sizes(self, weight_alloc):
+    def _compute_weight_sizes(self, weight_alloc: common_ht.WeightAllocation):
         """Computes the number of weight blocks, their size, axis to stack, etc."""
         assert self.input_dim > 0
         if weight_alloc == common_ht.WeightAllocation.SPATIAL:
@@ -627,7 +647,7 @@ class ConvLayer(BaseCNNLayer):
         else:
             raise ValueError("Unknown WeightAllocation value.")
 
-    def _setup(self, inputs):
+    def _setup(self, inputs: torch.Tensor) -> None:
         """Input-specific setup."""
         # inputs -> [NCHW]
         self.input_dim = int(inputs.shape[-1])
@@ -647,52 +667,39 @@ class ConvLayer(BaseCNNLayer):
         )
         self.generator.set_feature_extractor_class(feature_extractor_class)
 
-    def forward(self, inputs, training=True):
+        self.conv = nn.Conv2d(
+            in_channels=inputs.shape[1],
+            out_channels=self.output_dim,
+            kernel_size=self.kernel_size,
+            stride=self.stride,
+            padding=self.padding,
+            bias=self.generate_bias,
+        )
+        self.bn = nn.BatchNorm2d(self.output_dim)
+        if self.maxpool_size is not None:
+            self.maxpool = nn.MaxPool2d(
+                kernel_size=self.maxpool_size,
+                stride=self.maxpool_size,
+                padding=0, # padding="valid"
+            )
+        else:
+            self.maxpool = None
+
+    def forward(self, inputs: torch.Tensor, training: bool = True) -> torch.Tensor:
         # Layers should be created in `__call__` to properly build weights from
         # Transformer outputs for both training and evaluation.
-        self.conv = tf.layers.Conv2D(
-            filters=self.output_dim,
-            kernel_size=(self.kernel_size, self.kernel_size),
-            strides=(self.stride, self.stride),
-            padding=self.padding,
-            use_bias=self.generate_bias,
-            name="conv",
-        )
-        self.bn = tf.layers.BatchNormalization()
         output = self.conv(inputs)
         if not self.act_after_bn:
             output = self.act_fn(output)
-        if self.maxpool_size is not None:
-            maxpool = tf.keras.layers.MaxPool2D(
-                pool_size=(self.maxpool_size, self.maxpool_size),
-                strides=(self.maxpool_size, self.maxpool_size),
-                padding="valid",
-            )
-            output = maxpool(output)
-        
-        """
-        # Batch normalization is always in the training mode.
-        #
-        # ------------------------------------------------------------------
-        # In a standard CNN:
-        #   - During training, training=True  -> use batch mean/variance
-        #   - During testing,  training=False -> use global mean/variance (moving averages) from training
-        #   Assumes train/test data come from the same distribution.
-        #
-        # In this hypertransformer + few-shot setting:
-        #   - Each forward pass is a new task (e.g., "cat vs dog", then "plane vs ship")
-        #   - CNN weights are generated per task, not fixed
-        #   - There is no stable global feature distribution
-        #
-        # Therefore, BatchNorm must always use batch statistics (training=True)
-        # to normalize features based on the current task's data.
-        """
-        output = self.bn(output, training=True)
+        if self.maxpool_size is not None and self.maxpool is not None:
+            output = self.maxpool(output)
+
+        output = self.bn(output)
         if self.act_after_bn:
             output = self.act_fn(output)
         return output
 
-    def _var_getter(self, offsets, weights, shape, name):
+    def _var_getter(self, offsets: dict, weights: list[torch.Tensor], shape, name: str):
         if name.endswith("/kernel"):
             if self.generate_weights:
                 """Take the kernel part from each w
@@ -759,7 +766,7 @@ class LogitsLayer(BaseCNNLayer):
         model_config: LayerwiseModelConfig,
         num_features: Optional[int] = None,
         fe_kernel_size=3,
-        head_builder=None,
+        head_builder: Optional[Callable[..., "BaseCNNLayer"]] = None,
     ):
         super().__init__(
             name=name,
@@ -769,7 +776,7 @@ class LogitsLayer(BaseCNNLayer):
             var_reg_weight=0.0,
         )
 
-        self.dropout = tf.layers.Dropout(rate=model_config.cnn_dropout_rate)
+        self.dropout = nn.Dropout(p=model_config.cnn_dropout_rate)
 
         if num_features is None:
             num_features = model_config.num_features
@@ -779,7 +786,7 @@ class LogitsLayer(BaseCNNLayer):
         self.input_dim = -1
         self.initialized = False
 
-    def _setup(self, inputs):
+    def _setup(self, inputs: torch.Tensor) -> None:
         """Input-specific setup."""
         # inputs -> [NCHW]
         self.input_dim = int(inputs.shape[-1])
@@ -802,18 +809,23 @@ class LogitsLayer(BaseCNNLayer):
         )
         self.generator.set_feature_extractor_class(feature_extractor_class)
 
-    def __call__(self, tensor, training=True):
-        self.fc = tf.layers.Dense(units=self.model_config.num_labels, name="fc")
+        self.gap = nn.AdaptiveAvgPool2d(output_size=(1, 1))
+        self.fc = nn.Linear(
+            in_features=inputs.shape[1],
+            out_features=self.model_config.num_labels,
+        )
+
+    def forward(self, inputs: torch.Tensor, training: bool = True) -> torch.Tensor:
         # Global Average Pooling
-        # [batch, height, width, channels]
-        #       ↓
-        # [batch, channels]
-        tensor = tf.reduce_mean(tensor, axis=[1, 2])
-        dropout_tensor = self.dropout(tensor, training=training)
+        # [batch, channels, height, width] → [batch, channels, 1, 1]
+        inputs = self.gap(inputs)
+        # [batch, channels, 1, 1] → [batch, channels]
+        inputs = inputs.flatten(start_dim=1)
+        dropout_tensor = self.dropout(inputs)
         # [batch, channels] → [batch, num_labels]
         return self.fc(dropout_tensor)
 
-    def _var_getter(self, offsets, weights, shape, name):
+    def _var_getter(self, offsets: dict, weights: list[torch.Tensor], shape, name: str):
         if weights is None:
             return None
 
@@ -843,7 +855,7 @@ class FlattenLogitsLayer(LogitsLayer):
        [batch, num_labels]
     """
 
-    def _setup(self, inputs):
+    def _setup(self, inputs: torch.Tensor) -> None:
         """Input-specific setup."""
         self.input_dim = int(inputs.shape[-1])
 
@@ -878,13 +890,16 @@ class FlattenLogitsLayer(LogitsLayer):
         )
         self.generator.set_feature_extractor_class(feature_extractor_class)
 
-    def __call__(self, tensor, training=True):
-        # [batch, H, W, C] → [batch, H*W*C]
-        flatten = tf.layers.Flatten()
+        self.fc = nn.Linear(
+            in_features=inputs.shape[1],
+            out_features=self.model_config.num_labels,
+        )
 
-        # [batch, H*W*C] → [batch, num_labels]
-        self.fc = tf.layers.Dense(units=self.model_config.num_labels, name="fc")
-        dropout_tensor = self.dropout(flatten(tensor), training=training)
+    def forward(self, inputs: torch.Tensor, training: bool = True) -> torch.Tensor:
+        # [batch, C, H, W] → [batch, C*H*W]
+        inputs = inputs.flatten(start_dim=1)
+        dropout_tensor = self.dropout(inputs)
+        # [batch, C*H*W] → [batch, num_labels]
         return self.fc(dropout_tensor)
 
 
@@ -915,14 +930,14 @@ class LayerwiseModel(common_ht.Model):
 
     def train(
         self,
-        inputs,
-        labels,
-        mask=None,
-        mask_random_samples=False,
-        enable_fe_dropout=False,
-        only_shared_feature=False,
-    ):
-        """Builds an entire CNN model using train inputs."""
+        inputs: torch.Tensor,
+        labels: torch.Tensor,
+        mask: Optional[torch.Tensor] = None,
+        mask_random_samples: bool = False,
+        enable_fe_dropout: bool = False,
+        only_shared_feature: bool = False,
+    ) -> GeneratedWeights:
+        """Builds an entire CNN model using train inputs (Support Set)."""
         all_weight_blocks = []
         all_head_blocks = {}
 
@@ -930,8 +945,8 @@ class LayerwiseModel(common_ht.Model):
         if self.shared_feature_extractor is not None:
             shared_features = self.shared_feature_extractor(inputs)
             if enable_fe_dropout and self.shared_fe_dropout > 0.0:
-                dropout = tf.layers.Dropout(rate=self.shared_fe_dropout)
-                shared_features = dropout(shared_features, training=True)
+                dropout = nn.Dropout(p=self.shared_fe_dropout)
+                shared_features = dropout(shared_features)
 
         if only_shared_feature:
             return GeneratedWeights(
@@ -963,34 +978,36 @@ class LayerwiseModel(common_ht.Model):
             )
 
         for layer, generate_weights in zip(self.layers, generate_weights_per_layers):
-            with tf.variable_scope("cnn_builder"):
-                weight_blocks = layer.create(
+            # cnn_builder
+            weight_blocks = layer.create(
+                input_tensor=inputs,
+                labels=labels,
+                mask=mask,
+                shared_features=shared_features,
+                enable_fe_dropout=enable_fe_dropout,
+                generate_weights=generate_weights,
+            )
+            all_weight_blocks.append(weight_blocks)
+
+            # cnn
+            assert weight_blocks is not None
+            inputs = layer.apply(
+                inputs,
+                weight_blocks=weight_blocks,
+                training=True,
+                separate_bn_variables=self.separate_bn_variables,
+            )
+
+            # cnn_builder_heads
+            if layer.head is not None:
+                head_blocks = layer.head.create(
                     input_tensor=inputs,
                     labels=labels,
                     mask=mask,
                     shared_features=shared_features,
                     enable_fe_dropout=enable_fe_dropout,
-                    generate_weights=generate_weights,
                 )
-                all_weight_blocks.append(weight_blocks)
-            with tf.variable_scope("cnn"):
-                inputs = layer.apply(
-                    inputs,
-                    weight_blocks=weight_blocks,
-                    training=True,
-                    separate_bn_variables=self.separate_bn_variables,
-                )
-
-            if layer.head is not None:
-                with tf.variable_scope("cnn_builder_heads"):
-                    head_blocks = layer.head.create(
-                        input_tensor=inputs,
-                        labels=labels,
-                        mask=mask,
-                        shared_features=shared_features,
-                        enable_fe_dropout=enable_fe_dropout,
-                    )
-                    all_head_blocks[layer.name] = head_blocks
+                all_head_blocks[layer.name] = head_blocks
 
         return GeneratedWeights(
             weight_blocks=all_weight_blocks,
@@ -1000,34 +1017,36 @@ class LayerwiseModel(common_ht.Model):
 
     def evaluate(
         self,
-        inputs,
-        weight_blocks=None,
-        training=True,
-    ):
-        """Passes input tensors through a built CNN model."""
+        inputs: torch.Tensor,
+        weight_blocks: Optional["GeneratedWeights"] = None,
+        training: bool = True,
+    ) -> torch.Tensor:
+        """Passes input tensors (Query Set) through a built CNN model."""
         if weight_blocks is None:
             raise ValueError("weight_blocks must be provided")
 
         self.layer_outputs = {}
-        with tf.variable_scope("cnn"):
-            for layer, layer_blocks in zip(self.layers, weight_blocks.weight_blocks):
-                inputs = layer.apply(
+
+        for layer, layer_blocks in zip(self.layers, weight_blocks.weight_blocks):
+            # cnn
+            inputs = layer.apply(
+                inputs,
+                weight_blocks=layer_blocks,
+                training=training,
+                evaluation=True,
+                separate_bn_variables=self.separate_bn_variables,
+            )
+
+            # cnn_builder_heads
+            head = None
+            if layer.head is not None:
+                head = layer.head.apply(
                     inputs,
-                    weight_blocks=layer_blocks,
+                    weight_blocks=weight_blocks.head_weight_blocks[layer.name],
                     training=training,
                     evaluation=True,
                     separate_bn_variables=self.separate_bn_variables,
                 )
-
-                head = None
-                if layer.head is not None:
-                    head = layer.head.apply(
-                        inputs,
-                        weight_blocks=weight_blocks.head_weight_blocks[layer.name],
-                        training=training,
-                        evaluation=True,
-                        separate_bn_variables=self.separate_bn_variables,
-                    )
-                self.layer_outputs[layer.name] = (inputs, head)
+            self.layer_outputs[layer.name] = (inputs, head)
 
         return inputs

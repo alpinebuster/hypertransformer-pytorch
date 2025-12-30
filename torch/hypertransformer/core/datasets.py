@@ -3,7 +3,7 @@
 import dataclasses
 import functools
 
-from typing import Any, Callable, Dict, Generator, \
+from typing import Any, Callable, Generator, \
     Optional, Tuple, Union, Mapping
 
 import numpy as np
@@ -421,7 +421,7 @@ class TaskGenerator:
 
     def __init__(
         self,
-        data: Dict[Any, np.ndarray],
+        data: dict[Any, np.ndarray],
         num_labels: int,
         always_same_labels=False,
         use_label_subset: Optional[UseLabelSubset] = None,
@@ -650,7 +650,7 @@ def make_numpy_data(
     label_key: str = "label",
     transpose: bool = True,
     max_batches: Optional[int] = None,
-) -> Dict[int, np.ndarray]:
+) -> dict[int, np.ndarray]:
     """Makes a label-to-samples dictionary from the TF dataset.
 
     Arguments:
@@ -673,7 +673,7 @@ def make_numpy_data(
     loader: DataLoader[Mapping[str, Any]] = DataLoader(
         ds, batch_size=batch_size, shuffle=False
     )
-    examples: Dict[int, list[np.ndarray]] = {
+    examples: dict[int, list[np.ndarray]] = {
         i: [] for i in range(num_labels)
     }
     batch_index: int = 0
@@ -717,7 +717,7 @@ def make_numpy_data(
         label_1: np.ndarray [N, C, H, W],
         ...}
     """
-    stacked: Dict[int, np.ndarray] = {
+    stacked: dict[int, np.ndarray] = {
         k: np.stack(v, axis=0) for k, v in examples.items()
     }
 

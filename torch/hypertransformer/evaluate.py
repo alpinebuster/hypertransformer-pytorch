@@ -3,8 +3,6 @@
 import functools
 import os
 
-from typing import Dict
-
 from absl import app, flags, logging
 import numpy as np
 import torch
@@ -63,7 +61,7 @@ def get_load_vars():
 
 def run_evaluation(
     model_config: common_ht.LayerwiseModelConfig,
-    dataset_configs: Dict[str, common_ht.DatasetConfig],
+    dataset_configs: dict[str, common_ht.DatasetConfig],
     make_outputs_fn,
 ):
     """Runs model evaluation loop over a set of datasets.
@@ -87,7 +85,7 @@ def run_evaluation(
         for name, config in dataset_configs.items()
     }
 
-    datasets: Dict[str, common_ht.DatasetSamples] = {}
+    datasets: dict[str, common_ht.DatasetSamples] = {}
     custom_labels, assign_ops, outputs = {}, {}, {}
     for name, info in dataset_info.items():
         datasets[name], custom_labels[name] = info
@@ -171,7 +169,7 @@ def run_evaluation(
 
 def evaluate_layerwise(
     model_config: common_ht.LayerwiseModelConfig,
-    dataset_configs: Dict[str, common_ht.DatasetConfig],
+    dataset_configs: dict[str, common_ht.DatasetConfig],
 ):
     """Evaluates a pretrained 'layerwise' model."""
     model = layerwise.build_model(

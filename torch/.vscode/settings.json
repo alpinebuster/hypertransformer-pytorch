@@ -2,9 +2,11 @@
     "cSpell.words": [
         "absl",
         "avgpool",
+        "ckpts",
         "convs",
         "embs",
         "hypertransformer",
+        "imagenet",
         "layerwise",
         "lrelu",
         "MAML",

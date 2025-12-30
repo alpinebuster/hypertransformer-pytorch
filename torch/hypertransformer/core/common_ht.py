@@ -29,21 +29,21 @@ class Model:
 
     def train(
         self,
-        inputs,
-        labels,
-        mask: Optional[object] = None,
+        inputs: torch.Tensor,
+        labels: torch.Tensor,
+        mask: Optional[torch.Tensor] = None,
         mask_random_samples: bool = False,
         enable_fe_dropout: bool = False,
         only_shared_feature: bool = False,
-    ):
+    ) -> GeneratedWeights:
         raise NotImplementedError
 
     def evaluate(
         self,
-        inputs,
+        inputs: torch.Tensor,
         weight_blocks: "Optional[GeneratedWeights]" = None,
         training: bool = False,
-    ):
+    ) -> torch.Tensor:
         raise NotImplementedError
 
 

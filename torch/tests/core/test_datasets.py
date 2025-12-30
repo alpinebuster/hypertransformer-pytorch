@@ -6,12 +6,12 @@ import torch
 from torch.utils.data import Dataset
 
 from hypertransformer.core import datasets
-from hypertransformer.core.datasets import AugmentationConfig, RandomizedAugmentationConfig
 
 
 # ------------------------------------------------------------
 #   Class `TaskGenerator` Tests
 # ------------------------------------------------------------
+
 
 class FakeTorchDataset(Dataset):
     def __init__(self, images: np.ndarray, labels: np.ndarray):

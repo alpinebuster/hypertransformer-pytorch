@@ -8,6 +8,8 @@ from absl import app, flags, logging
 
 import torch
 import torch.nn as nn
+from torch.optim import Optimizer
+from torch.optim.lr_scheduler import LRScheduler
 
 from hypertransformer import common_flags
 from hypertransformer import eval_model_flags  # pylint:disable=unused-import
@@ -187,15 +189,26 @@ def make_test_dataset_config(dataset_spec=""):
 # ------------------------------------------------------------
 
 
-def make_optimizer(optim_config: common.OptimizerConfig, global_step):
-    learning_rate = tf.train.exponential_decay(
-        optim_config.learning_rate,
-        global_step,
-        optim_config.lr_decay_steps,
-        optim_config.lr_decay_rate,
+def make_optimizer(optim_config: common.OptimizerConfig, model: nn.Module) -> tuple[Optimizer, LRScheduler]:
+    optimizer = torch.optim.SGD(
+        model.parameters(),
+        lr=optim_config.learning_rate,
     )
-    optimizer = tf.train.GradientDescentOptimizer(learning_rate=learning_rate)
-    return learning_rate, optimizer
+
+    # scheduler = torch.optim.lr_scheduler.StepLR(
+    #     optimizer,
+    #     step_size=optim_config.lr_decay_steps,
+    #     gamma=optim_config.lr_decay_rate,
+    # )
+    scheduler = torch.optim.lr_scheduler.LambdaLR(
+        optimizer,
+        lr_lambda=lambda step: (
+            optim_config.lr_decay_rate
+            ** (step / optim_config.lr_decay_steps)
+        ),
+    )
+
+    return optimizer, scheduler
 
 
 def make_train_op(optimizer, loss, train_vars=None):

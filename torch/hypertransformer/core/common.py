@@ -4,7 +4,7 @@ import dataclasses
 import os
 import time
 
-from typing import Any, Callable, Dict, Optional, Text, Union, \
+from typing import Any, Callable, Optional, Text, Union, \
     TypedDict
 from typing_extensions import Annotated
 
@@ -30,15 +30,15 @@ field = dataclasses.field
 
 
 class Sample(TypedDict):
-    image: Annotated[np.ndarray, "(H, W, C)"]
+    image: Annotated[np.ndarray, "(C, H, W)"]
     label: int | np.integer
 
 class Batch(TypedDict):
-    image: Annotated[torch.Tensor, "(B, H, W, C)"]
+    image: Annotated[torch.Tensor, "(B, C, H, W)"]
     label: Annotated[torch.Tensor, "(B,)"]
 
 class BatchNumpy(TypedDict):
-    image: Annotated[np.ndarray, "(B, H, W, C)"]
+    image: Annotated[np.ndarray, "(B, C, H, W)"]
     label: Annotated[np.ndarray, "(B,)"]
 
 
@@ -55,36 +55,41 @@ class TrainConfig:
 @dataclasses.dataclass
 class TrainState:
     """Model state."""
+    model: torch.nn.Module
+    optimizer: torch.optim.Optimizer
+    global_step: int = 0
 
-    train_op: torch.Tensor
-    init_op: Optional[tf.Operation] = None
-    step_initializer: Optional[tf.Operation] = None
-    update_op: tf.Operation = field(default_factory=tf.no_op)
-    small_summaries: Union[list[Any], Dict[Text, list[Any]], None] = field(
-        default_factory=list
-    )
-    large_summaries: Union[list[Any], Dict[Text, list[Any]], None] = field(
-        default_factory=list
-    )
-
-    global_step: torch.Tensor = dataclasses.field(
-        default_factory=tf.train.get_or_create_global_step
-    )
-
-    summary_writer: tf.summary.FileWriter = None
-    saver: tf.train.Saver = field(default_factory=get_default_saver)
-
-    record_graph_in_summary: dataclasses.InitVar[bool] = True
-
-    tensors_to_eval: Optional[Any] = None
+    summary_writer: Optional[util.MultiFileWriter] = None
     per_step_fn: Optional[Callable[[torch.Tensor, Any, Any], None]] = None
+
+    checkpoint_dir: str = FLAGS.train_log_dir
     checkpoint_suffix: str = "model"
 
-    def __post_init__(self, record_graph_in_summary: bool):
-        if self.summary_writer is None:
-            self.summary_writer = get_default_summary_writer(
-                dump_graph=record_graph_in_summary
-            )
+    def save(self):
+        os.makedirs(self.checkpoint_dir, exist_ok=True)
+        path = os.path.join(
+            self.checkpoint_dir,
+            f"{self.checkpoint_suffix}_{self.global_step}.pt"
+        )
+        torch.save({
+            "model": self.model.state_dict(),
+            "optimizer": self.optimizer.state_dict(),
+            "step": self.global_step,
+        }, path)
+
+    def load_latest(self) -> bool:
+        restore_path = os.path.dirname(
+            os.path.join(self.checkpoint_dir, self.checkpoint_suffix)
+        )
+        ckpts = util.latest_checkpoint(restore_path)
+        if not ckpts:
+            return False
+        ckpt = max(ckpts, key=os.path.getmtime)
+        data = torch.load(ckpt, map_location="cpu")
+        self.model.load_state_dict(data["model"])
+        self.optimizer.load_state_dict(data["optimizer"])
+        self.global_step = data["step"]
+        return True
 
 
 @dataclasses.dataclass
@@ -104,15 +109,6 @@ class ModelOutputs:
     accuracy: torch.Tensor
     labels: Optional[torch.Tensor] = None
     test_accuracy: Optional[torch.Tensor] = None
-
-
-def merge_summaries(summaries):
-    if isinstance(summaries, dict):
-        return {k: tf.summary.merge(v) for k, v in summaries.items()}
-    elif summaries:
-        return tf.summary.merge(summaries)
-    else:
-        return None
 
 
 def _is_not_empty(tensor):
@@ -201,29 +197,12 @@ def init_training(state: TrainState) -> bool:
     Returns:
       True if checkpoint was found and false otherwise.
     """
-    state.large_summaries = merge_summaries(
-        state.large_summaries
-    )
-    state.small_summaries = merge_summaries(
-        state.small_summaries
-    )
-    sess = tf.get_default_session()
-    init_op = state.init_op
-    if state.init_op is None:
-        init_op = [
-            tf.initializers.global_variables(),
-            tf.initializers.local_variables(),
-        ]
+    if state.summary_writer is None:
+        state.summary_writer = util.MultiFileWriter(state.checkpoint_dir)
 
-    sess.run(init_op)
-    restore_path = os.path.dirname(
-        os.path.join(FLAGS.train_log_dir, state.checkpoint_suffix)
-    )
-    checkpoint = util.latest_checkpoint(restore_path)
-    if checkpoint is None:
-        logging.warning("No checkpoint found.")
-        return False
+    restored = state.load_latest()
+    if not restored:
+        print("No checkpoint found.")
     else:
-        logging.info('Restoring from "%s".', checkpoint)
-        state.saver.restore(sess, checkpoint)
-        return True
+        print(f"Restored from step {state.global_step}")
+    return restored

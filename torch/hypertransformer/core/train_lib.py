@@ -5,7 +5,7 @@ import functools
 import os
 import random
 
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import numpy as np
 import torch
@@ -24,7 +24,7 @@ NUMPY_BATCH_SIZE = 128
 class ModelState:
     """Model state."""
 
-    loss: Optional[tf.Tensor] = None
+    loss: Optional[torch.Tensor] = None
 
 
 @dataclasses.dataclass
@@ -60,7 +60,7 @@ def _convert_bool(arr: np.ndarray):
     return arr.astype(np.int8) * 255
 
 
-def _load_cache(data_config: DatasetConfig) -> Optional[Dict[int, np.ndarray]]:
+def _load_cache(data_config: DatasetConfig) -> Optional[dict[int, np.ndarray]]:
     """Loads cached dataset from a saved NumPy array."""
     folder = os.path.join(data_config.cache_path, data_config.dataset_name)
     path = os.path.join(data_config.cache_path, data_config.dataset_name + ".npy")
@@ -97,9 +97,9 @@ def _load_cache(data_config: DatasetConfig) -> Optional[Dict[int, np.ndarray]]:
     return None
 
 
-def _make_numpy_array(data_config: DatasetConfig, batch_size: int, sess=None) -> Dict[int, np.ndarray]:
+def _make_numpy_array(data_config: DatasetConfig, batch_size: int, sess=None) -> dict[int, np.ndarray]:
     """Makes a NumPy array for given dataset configuration."""
-    # Dict[int, np.ndarray]:
+    # dict[int, np.ndarray]:
     #   int -> all_classes
     #   np.ndarray -> [all_samples, W, H, C]
     output = None

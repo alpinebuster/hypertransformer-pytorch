@@ -4,7 +4,7 @@ import functools
 import glob
 import math
 import os
-from typing import Callable, Optional, Dict, Iterable, Union, Any
+from typing import Callable, Optional, Iterable, Union, Any
 
 from absl import logging
 import torch
@@ -144,7 +144,8 @@ class _TransformerIO(nn.Module):
             num_embeddings=num_labels + 1,
             embedding_dim=embedding_dim,
         )
-        # TensorFlow defaults to a normal distribution with stddev=1.0, while PyTorch defaults to a uniform distribution for nn.Embedding initialization
+        # TensorFlow defaults to a normal distribution with stddev=1.0, 
+        # while PyTorch defaults to a uniform distribution for `nn.Embedding` initialization
         nn.init.normal_(self.label_embs.weight, mean=0.0, std=1.0)
 
         # Weight embeddings are independent parameters (not an embedding table)
@@ -415,7 +416,7 @@ def _extract_checkpoint_step(s: str) -> int:
 
 def _find_latest_checkpoint(ckpt_dir: str) -> Optional[str]:
     """Find latest checkpoint in directory by step number."""
-    all_checkpoints = glob.glob(os.path.join(ckpt_dir, "*.pth"))
+    all_checkpoints = glob.glob(os.path.join(ckpt_dir, "*.pt"))
     if not all_checkpoints:
         return None
 
@@ -444,7 +445,7 @@ def load_variables(
     var_list: Optional[Iterable[str]] = None,
     step: Optional[int] = None,
     map_location: Union[str, torch.device] = "cpu",
-) -> Dict[str, torch.Tensor]:
+) -> dict[str, torch.Tensor]:
     """
     Load variables from a PyTorch checkpoint.
 
@@ -455,7 +456,7 @@ def load_variables(
         map_location: torch.load map_location.
 
     Returns:
-        Dict[name, Tensor]
+        dict[name, Tensor]
     """
     # File or Directory → latest checkpoint
     path = latest_checkpoint(loc)
@@ -471,7 +472,7 @@ def load_variables(
 
     logging.info(f"Loading from {loc}")
     ckpt: dict = torch.load(loc, map_location=map_location)
-    state_dict: Dict[str, torch.Tensor] = ckpt.get("state_dict", ckpt)
+    state_dict: dict[str, torch.Tensor] = ckpt.get("state_dict", ckpt)
 
     if var_list is None:
         return dict(state_dict)
@@ -508,7 +509,7 @@ class MultiFileWriter:
     def __init__(self, logdir: str, **kwargs):
         self.summary_kwargs = dict(kwargs)
         self.logdir = logdir
-        self.writers: Dict[Optional[str], SummaryWriter] = {}
+        self.writers: dict[Optional[str], SummaryWriter] = {}
 
     def _get_writer(self, name: Optional[str] = None) -> SummaryWriter:
         if name not in self.writers:
@@ -540,7 +541,7 @@ class MultiFileWriter:
 
     def add_scalars(
         self,
-        scalars: Dict[str, float],
+        scalars: dict[str, float],
         global_step: Optional[int] = None
     ):
         """
