@@ -2,6 +2,7 @@
 
 import dataclasses
 import functools
+import random
 
 from typing import Any, Callable, Generator, \
     Optional, Tuple, Union, Mapping
@@ -129,10 +130,10 @@ def _crop_and_resize(
 
     squeeze = False
     if images.dim() == 3:
-        # (C,H,W) → (1,C,H,W)
-        images = images.unsqueeze(0)
-        # bbox (4,) → (1,4)
-        bboxes = bboxes.unsqueeze(0)
+        # (C, H, W) → (1, C, H, W)
+        images = images.unsqueeze(dim=0)
+        # bbox (4,) → (1, 4)
+        bboxes = bboxes.unsqueeze(dim=0)
         squeeze = True
     B, _, H, W = images.shape
 
@@ -335,6 +336,44 @@ class AugmentationConfig:
     def __init__(self, random_config: RandomizedAugmentationConfig):
         self.random_config = random_config
         self.transform = self._build_transform()
+
+    def randomize_op(self, img: torch.Tensor) -> torch.Tensor:
+        """Apply random augmentations directly on a single image tensor [C,H,W]."""
+        cfg = self.random_config
+        img_aug = img.clone()
+
+        if cfg.rotate_by_90 and random.random() < cfg.rotation_probability:
+            times = random.randint(0, 3)
+            img_aug = torch.rot90(img_aug, k=times, dims=(1, 2))
+
+        if random.random() < cfg.rotation_probability:
+            angle = random.uniform(-cfg.angle_range, cfg.angle_range)
+            img_aug = TF.rotate(img_aug, angle)
+
+        if random.random() < cfg.smooth_probability:
+            img_aug = TF.gaussian_blur(img_aug, kernel_size=[3, 3])
+
+        if random.random() < cfg.contrast_probability:
+            factor = random.uniform(0.5, 1.5)
+            img_aug = TF.adjust_contrast(img_aug, factor)
+
+        if random.random() < cfg.negate_probability:
+            img_aug = 1.0 - img_aug
+
+        if random.random() < cfg.resize_probability:
+            scale = random.uniform(0.7, 1.0)
+            _, H, W = img_aug.shape
+            new_H = int(H * scale)
+            new_W = int(W * scale)
+            img_aug = TF.resize(img_aug, [new_H, new_W])
+            img_aug = TF.resize(img_aug, [H, W])
+
+        if random.random() < cfg.roll_probability:
+            shift_x = int(img_aug.shape[2] * random.uniform(-cfg.roll_range, cfg.roll_range))
+            shift_y = int(img_aug.shape[1] * random.uniform(-cfg.roll_range, cfg.roll_range))
+            img_aug = torch.roll(img_aug, shifts=(shift_y, shift_x), dims=(1, 2))
+
+        return img_aug
 
     def _build_transform(self) -> T.Compose:
         cfg = self.random_config
@@ -656,7 +695,7 @@ def make_numpy_data(
     Arguments:
        ds: PyTorch Dataset. Each item should be a mapping containing image and label entries.
         {
-            "image": np.ndarray [B, H, W, C],
+            "image": np.ndarray [B, C, H, W],
             "label": np.ndarray [B],
         }
        batch_size: Batch size used by DataLoader.
@@ -668,7 +707,7 @@ def make_numpy_data(
        max_batches: If provided, we process no more than this number of batches.
 
     Returns:
-       Dictionary mapping labels to tensors containing all samples (samples_per_label, H, W, C).
+       Dictionary mapping labels to tensors containing all samples (samples_per_label, C, H, W).
     """
     loader: DataLoader[Mapping[str, Any]] = DataLoader(
         ds, batch_size=batch_size, shuffle=False

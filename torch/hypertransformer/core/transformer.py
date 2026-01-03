@@ -156,6 +156,7 @@ class PWFeedForward(nn.Module):
 
         self.name = name
         assert output_dim is not None
+        # Called after MHA, so the input_dim = mha_output_dim
         self.input_dim = output_dim
         # [..., input_dim] -> [..., internal_dim]
         self.layer_1 = nn.Linear(self.input_dim, internal_dim)
@@ -188,6 +189,8 @@ class MultiHeadAttention(nn.Module):
         self.v_dim = params.value_dim
 
         assert params.mha_output_dim is not None
+        # D_model is the transformer hidden size（embedding dim）
+        # D_model = D_mha_out
         self.w_q = nn.Linear(params.mha_output_dim, params.query_key_dim)
         self.w_k = nn.Linear(params.mha_output_dim, params.query_key_dim)
         self.w_v = nn.Linear(params.mha_output_dim, params.value_dim)

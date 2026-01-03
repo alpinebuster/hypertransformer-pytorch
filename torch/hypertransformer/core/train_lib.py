@@ -97,28 +97,32 @@ def _load_cache(data_config: DatasetConfig) -> Optional[dict[int, np.ndarray]]:
     return None
 
 
-def _make_numpy_array(data_config: DatasetConfig, batch_size: int, sess=None) -> dict[int, np.ndarray]:
-    """Makes a NumPy array for given dataset configuration."""
+def _make_numpy_array(data_config: DatasetConfig, batch_size: int) -> dict[int, np.ndarray]:
+    """Makes a NumPy array for given dataset configuration.
+    
+    Returns:
+       Dictionary mapping labels to tensors containing all samples (samples_per_label, C, H, W).
+    """
     # dict[int, np.ndarray]:
     #   int -> all_classes
-    #   np.ndarray -> [all_samples, W, H, C]
+    #   np.ndarray -> [all_samples, C, H, W]
     output = None
-    if sess is None:
-        sess = tf.Session()
+
     ds = data_config.ds
     if ds is None:
         output = _load_cache(data_config)
         if output is None:
-            ds = tfds.load(data_config.dataset_name, data_dir=data_config.data_dir)[ # type: ignore
-                data_config.ds_split
-            ]
+            # ds = tfds.load(data_config.dataset_name, data_dir=data_config.data_dir)[
+            #     data_config.ds_split
+            # ]
+            raise ValueError(f"Dataset {data_config.dataset_name} not found and no cache available.")
 
     dataset_info = data_config.dataset_info
     if dataset_info is None:
         dataset_info = datasets.get_dataset_info(data_config.dataset_name)
 
     if output is None:
-        assert dataset_info.num_samples_per_label is not None
+        assert dataset_info.num_samples_per_label is not None and ds is not None
         output = datasets.make_numpy_data(
             ds=ds,
             batch_size=batch_size,
@@ -151,10 +155,9 @@ def _make_dataset_helper_unbalanced(
     num_labels: int,
     data_config: DatasetConfig,
     always_same_labels=False,
-    sess=None,
 ):
     """Helper function for creating a dataset."""
-    numpy_arr = _make_numpy_array(data_config, batch_size, sess)
+    numpy_arr = _make_numpy_array(data_config, batch_size)
     config = make_augmentation_config(data_config=data_config, num_labels=num_labels)
 
     with tf.name_scope(name=None, default_name="data"):
@@ -189,10 +192,9 @@ def _make_dataset_helper_balanced(
     num_labels: int,
     data_config: DatasetConfig,
     always_same_labels=False,
-    sess=None,
 ) -> tuple[list[tuple[Any, Any, Any]], Any]:
     """Helper function for creating a balanced dataset."""
-    numpy_arr = _make_numpy_array(data_config, NUMPY_BATCH_SIZE, sess)
+    numpy_arr = _make_numpy_array(data_config, NUMPY_BATCH_SIZE)
     config = make_augmentation_config(data_config=data_config, num_labels=num_labels)
 
     with tf.name_scope(name=None, default_name="data"):
@@ -264,10 +266,10 @@ def make_dataset_unbalanced(
     transformer_samples = model_config.num_transformer_samples
     transformer_images = images[:transformer_samples]
     if len(transformer_images.shape) == 3:
-        transformer_images = tf.expand_dims(transformer_images, axis=-1)
+        transformer_images = transformer_images.unsqueeze(dim=-1)
     cnn_images = images[transformer_samples:]
     if len(cnn_images.shape) == 3:
-        cnn_images = tf.expand_dims(cnn_images, axis=-1)
+        cnn_images = cnn_images.unsqueeze(dim=-1)
 
     real_class_min, real_class_max = _get_class_bounds(data_config)
 
@@ -318,9 +320,9 @@ def make_dataset_balanced(
 
     # NCHW
     if len(transformer_images.shape) == 3:
-        transformer_images = tf.expand_dims(transformer_images, axis=-1)
+        transformer_images = transformer_images.unsqueeze(dim=-1)
     if len(cnn_images.shape) == 3:
-        cnn_images = tf.expand_dims(cnn_images, axis=-1)
+        cnn_images = cnn_images.unsqueeze(dim=-1)
 
     real_class_min, real_class_max = _get_class_bounds(data_config)
 

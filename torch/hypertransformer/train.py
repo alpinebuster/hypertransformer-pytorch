@@ -317,82 +317,82 @@ def create_layerwise_model(
     """Creates a hierarchical Transformer-CNN model."""
     logging.info("Building the model")
     global_step = tf.train.get_or_create_global_step()
-    model_builder = layerwise.build_model(
+    model = layerwise.build_model(
         model_config.cnn_model_name,
         model_config=model_config,
     )
 
-    with tf.variable_scope("model"):
-        weight_blocks = model_builder.train(
-            dataset.transformer_images,
-            dataset.transformer_labels,
-            mask=dataset.transformer_masks,
-            mask_random_samples=True,
-            enable_fe_dropout=True,
-        )
-        predictions = model_builder.evaluate(
-            dataset.cnn_images,
-            weight_blocks=weight_blocks,
-            training=False,
-        )
 
-        heads = []
-        if model_config.train_heads:
-            outputs = model_builder.layer_outputs.values()
-            # layer_outputs[layer.name] => (inputs, head)
-            heads = [output[1] for output in outputs if output[1] is not None]
+    weight_blocks = model.train(
+        dataset.transformer_images,
+        dataset.transformer_labels,
+        mask=dataset.transformer_masks,
+        mask_random_samples=True,
+        enable_fe_dropout=True,
+    )
+    predictions = model.evaluate(
+        dataset.cnn_images,
+        weight_blocks=weight_blocks,
+        training=False,
+    )
 
-        test_weight_blocks = model_builder.train(
-            test_dataset.transformer_images,
-            test_dataset.transformer_labels,
-            mask=test_dataset.transformer_masks,
-        )
-        test_predictions = model_builder.evaluate(
-            test_dataset.cnn_images,
-            weight_blocks=test_weight_blocks,
-            training=False,
-        )
+    heads = []
+    if model_config.train_heads:
+        outputs = model.layer_outputs.values()
+        # layer_outputs[layer.name] => (inputs, head)
+        heads = [output[1] for output in outputs if output[1] is not None]
 
-    with tf.variable_scope("loss"):
-        labels = tf.one_hot(dataset.cnn_labels, depth=model_config.num_labels)
-        pred_labels = tf.cast(tf.argmax(predictions, axis=-1), tf.int32)
-        num_cnn_samples = tf.cast(tf.shape(dataset.cnn_labels)[0], tf.float32)
+    test_weight_blocks = model.train(
+        test_dataset.transformer_images,
+        test_dataset.transformer_labels,
+        mask=test_dataset.transformer_masks,
+    )
+    test_predictions = model.evaluate(
+        test_dataset.cnn_images,
+        weight_blocks=test_weight_blocks,
+        training=False,
+    )
 
-        def _acc(pred):
-            accuracy = tf.cast(tf.math.equal(dataset.cnn_labels, pred), tf.float32)
-            return tf.reduce_sum(accuracy) / num_cnn_samples
 
-        accuracy = _acc(pred_labels)
-        head_preds = [tf.cast(tf.argmax(head, axis=-1), tf.int32) for head in heads]
-        head_accs = [_acc(pred) for pred in head_preds]
+    labels = tf.one_hot(dataset.cnn_labels, depth=model_config.num_labels)
+    pred_labels = tf.cast(tf.argmax(predictions, axis=-1), tf.int32)
+    num_cnn_samples = tf.cast(tf.shape(dataset.cnn_labels)[0], tf.float32)
 
-        test_pred_labels = tf.cast(tf.argmax(test_predictions, axis=-1), tf.int32)
-        test_accuracy = tf.cast(
-            tf.math.equal(test_dataset.cnn_labels, test_pred_labels), tf.float32
-        )
-        test_accuracy = tf.reduce_sum(test_accuracy) / num_cnn_samples
+    def _acc(pred):
+        accuracy = tf.cast(tf.math.equal(dataset.cnn_labels, pred), tf.float32)
+        return tf.reduce_sum(accuracy) / num_cnn_samples
 
-        summaries = []
-        reg_losses = tf.losses.get_losses(
-            loss_collection=tf.GraphKeys.REGULARIZATION_LOSSES
-        )
-        if reg_losses:
-            summaries.append(
-                tf.summary.scalar("loss/regularization", tf.reduce_sum(reg_losses))
-            )
+    accuracy = _acc(pred_labels)
+    head_preds = [tf.cast(tf.argmax(head, axis=-1), tf.int32) for head in heads]
+    head_accs = [_acc(pred) for pred in head_preds]
 
-        shared_head_loss, shared_head_acc = _create_shared_head(
-            weight_blocks.shared_features,
-            dataset.transformer_real_classes,
-            dataset.real_class_min,
-            dataset.real_class_max,
+    test_pred_labels = tf.cast(tf.argmax(test_predictions, axis=-1), tf.int32)
+    test_accuracy = tf.cast(
+        tf.math.equal(test_dataset.cnn_labels, test_pred_labels), tf.float32
+    )
+    test_accuracy = tf.reduce_sum(test_accuracy) / num_cnn_samples
+
+    summaries = []
+    reg_losses = tf.losses.get_losses(
+        loss_collection=tf.GraphKeys.REGULARIZATION_LOSSES
+    )
+    if reg_losses:
+        summaries.append(
+            tf.summary.scalar("loss/regularization", tf.reduce_sum(reg_losses))
         )
 
-        state.loss, _, warmup_weights = make_loss(labels, predictions, heads)
-        summaries.append(tf.summary.scalar("loss/ce", state.loss))
-        if reg_losses:
-            state.loss += tf.reduce_sum(reg_losses)
-        _, optimizer = make_optimizer(optim_config, global_step)
+    shared_head_loss, shared_head_acc = _create_shared_head(
+        weight_blocks.shared_features,
+        dataset.transformer_real_classes,
+        dataset.real_class_min,
+        dataset.real_class_max,
+    )
+
+    state.loss, _, warmup_weights = make_loss(labels, predictions, heads)
+    summaries.append(tf.summary.scalar("loss/ce", state.loss))
+    if reg_losses:
+        state.loss += tf.reduce_sum(reg_losses)
+    _, optimizer = make_optimizer(optim_config, global_step)
 
     if shared_head_loss is not None:
         if model_config.shared_head_weight > 0.0:
@@ -548,11 +548,13 @@ def train(
 
     if common_flags.PRETRAIN_SHARED_FEATURE.value:
         create_model = functools.partial(
-            create_shared_feature_model, model_config=layerwise_model_config
+            create_shared_feature_model,
+            model_config=layerwise_model_config,
         )
     else:
         create_model = functools.partial(
-            create_layerwise_model, model_config=layerwise_model_config
+            create_layerwise_model,
+            model_config=layerwise_model_config,
         )
 
     logging.info("Training")

@@ -5,8 +5,7 @@ from collections import namedtuple
 import pytest
 import torch
 
-from hypertransformer.core import util
-from hypertransformer.core.util import _TransformerIO, SimpleTransformerIO, \
+from hypertransformer.core.util import SimpleTransformerIO, \
     SeparateTransformerIO, JointTransformerIO
 
 IOParams = namedtuple("IOParams", [

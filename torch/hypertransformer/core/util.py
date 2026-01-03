@@ -17,66 +17,6 @@ from hypertransformer.core import transformer
 TransformerParamsFn = Callable[[int], transformer.TransformerParams]
 
 
-def var_getter_wrapper(getter, name: str, *args, **kwargs):
-    """Convenient wrapper around CNN variable getters."""
-    shape = kwargs.get("shape")
-
-    weights = kwargs.pop("_weights")
-    cnn_var_getter = kwargs.pop("_cnn_var_getter")
-    getter_dict = kwargs.pop("_getter_dict")
-    add_trainable_weights = kwargs.pop("_add_trainable_weights", False)
-    var_reg_weight = kwargs.pop("_var_reg_weight", 0.0)
-    evaluation = kwargs.pop("_evaluation", False)
-    separate_bn = kwargs.pop("_separate_bn", False)
-    passed_regularizer = kwargs.pop("_kernel_regularizer", None)
-
-    # Currently only support FC and conv kernel regularization.
-    regularizer = passed_regularizer if name.endswith("/kernel") else None
-
-    if "offsets" in getter_dict:
-        # Dictionary of offsets is used to allocate more than one tensor in the
-        # same embedding.
-        offsets = getter_dict["offsets"]
-        # These are actual generated weights.
-        all_weights = getter_dict["all_weights"]
-    else:
-        offsets, all_weights = {}, {}
-        getter_dict["offsets"] = offsets
-        getter_dict["all_weights"] = all_weights
-
-    built_weights = cnn_var_getter(offsets, weights, shape, name)
-
-    var_name = name
-    if evaluation and separate_bn:
-        var_name += "-eval"
-
-    if built_weights is None:
-        kwargs["regularizer"] = regularizer
-        built_weights = getter(var_name, *args, **kwargs)
-    else:
-        if add_trainable_weights:
-            var_weights = getter(var_name, *args, **kwargs)
-            if var_reg_weight > 0.0:
-                logging.info(f"Adding weight variation regularization to {name}")
-                built_weight_mag = tf.reduce_sum(tf.square(built_weights))
-                var_weight_mag = tf.reduce_sum(tf.square(var_weights))
-                reg_loss = var_reg_weight * built_weight_mag / (1e-8 + var_weight_mag)
-                tf.losses.add_loss(
-                    tf.identity(reg_loss, name=f"reg_loss_{name}"),
-                    loss_collection=tf.GraphKeys.REGULARIZATION_LOSSES,
-                )
-            built_weights += var_weights
-
-        if regularizer is not None and name not in all_weights:
-            tf.losses.add_loss(
-                regularizer(built_weights),
-                loss_collection=tf.GraphKeys.REGULARIZATION_LOSSES,
-            )
-
-    all_weights[name] = built_weights
-    return all_weights[name]
-
-
 # ------------------------------------------------------------
 #   TransformerIO
 # ------------------------------------------------------------
@@ -140,6 +80,9 @@ class _TransformerIO(nn.Module):
         self.weight_block_size = weight_block_size
 
         # One additional class is reserved for "no label" class
+        # labels:         (num_samples,)
+        #               ↓
+        # encoded_labels: (num_samples, embedding_dim)
         self.label_embs: nn.Embedding = nn.Embedding(
             num_embeddings=num_labels + 1,
             embedding_dim=embedding_dim,

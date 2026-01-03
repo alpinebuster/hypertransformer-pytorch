@@ -262,7 +262,7 @@ def test_decoder_layer(
     # look-ahead mask: [B, 1, S, S]
     look_ahead_mask = torch.tril(
         torch.ones(seq_len, seq_len)
-    ).unsqueeze(0).unsqueeze(1)
+    ).unsqueeze(dim=0).unsqueeze(dim=1)
     look_ahead_mask = look_ahead_mask.expand(batch_size, 1, seq_len, seq_len)
     # padding mask: [B, 1, 1, S]
     padding_mask = torch.ones(batch_size, 1, 1, seq_len)

@@ -21,32 +21,6 @@ class DatasetInfo:
     transpose_images: bool = False
 
 
-class Model:
-    """Model abstract class."""
-
-    def __init__(self):
-        self.layer_outputs = {}
-
-    def train(
-        self,
-        inputs: torch.Tensor,
-        labels: torch.Tensor,
-        mask: Optional[torch.Tensor] = None,
-        mask_random_samples: bool = False,
-        enable_fe_dropout: bool = False,
-        only_shared_feature: bool = False,
-    ) -> GeneratedWeights:
-        raise NotImplementedError
-
-    def evaluate(
-        self,
-        inputs: torch.Tensor,
-        weight_blocks: "Optional[GeneratedWeights]" = None,
-        training: bool = False,
-    ) -> torch.Tensor:
-        raise NotImplementedError
-
-
 @dataclasses.dataclass
 class DatasetConfig:
     """Specification of the train or test dataset."""

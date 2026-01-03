@@ -21,7 +21,7 @@ flags.DEFINE_string(
     "",
     "Location of the NumPy dataset cache (can be useful for small datasets).",
 )
-flags.DEFINE_string("data_dir", None, "Location of the cached tfds data.")
+flags.DEFINE_string("data_dir", None, "Location of the cached data.")
 flags.DEFINE_integer("num_labels", 4, "Number of labels to pick for each task.")
 KERNEL_SIZE = flags.DEFINE_integer("kernel_size", 3, "Kernel size for the conv layers.")
 STRIDE = flags.DEFINE_integer("stride", 2, "Stride of the conv layers.")
