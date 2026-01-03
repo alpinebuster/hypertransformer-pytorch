@@ -684,8 +684,10 @@ class ConvLayer(BaseCNNLayer):
         # PyTorch 1.10+ supports "same" / "valid"
         assert padding in ("same", "valid")
         self.padding = padding
+        self.kernel = None
+        self.bias = None
 
-        self.input_dim = -1
+        self.input_dim = 1
         self.output_dim = output_dim
         self.stride = stride
         self.maxpool_size = maxpool_size
@@ -711,7 +713,7 @@ class ConvLayer(BaseCNNLayer):
             self.block_size = self.input_dim * self.output_dim
             self.conv_weight_size = self.block_size
 
-            self.stack_axis = 0
+            self.stack_axis = 0 # BCHW
         elif weight_alloc == common_ht.WeightAllocation.OUTPUT_CHANNEL:
             self.num_blocks = self.output_dim
             self.block_size = self.input_dim * int(self.kernel_size**2)
@@ -722,14 +724,14 @@ class ConvLayer(BaseCNNLayer):
             if self.generate_bn:
                 self.block_size += 2 # + gamma + beta
 
-            self.stack_axis = -1
+            self.stack_axis = 1 # BCHW
         else:
             raise ValueError("Unknown WeightAllocation value.")
 
     def _setup(self, inputs: torch.Tensor) -> None:
         """Input-specific setup."""
         # inputs -> [NCHW]
-        self.input_dim = int(inputs.shape[-1])
+        self.input_dim = int(inputs.shape[1])
         if self.num_features is None:
             self.num_features = max(self.output_dim, self.input_dim)
         self._compute_weight_sizes(self.model_config.weight_allocation)
@@ -748,11 +750,12 @@ class ConvLayer(BaseCNNLayer):
 
         in_ch = inputs.shape[1]
         out_ch = self.output_dim
-        self.kernel = nn.Parameter(torch.randn(out_ch, in_ch, self.kernel_size, self.kernel_size))
-        self.bias = nn.Parameter(torch.zeros(out_ch))
+        self.default_kernel = nn.Parameter(torch.empty(out_ch, in_ch, self.kernel_size, self.kernel_size))
+        nn.init.kaiming_normal_(self.default_kernel, mode="fan_out", nonlinearity="relu")
+        self.default_bias = nn.Parameter(torch.zeros(out_ch))
         if self.add_trainable_weights:
-            self.var_weights["kernel"] = nn.Parameter(torch.zeros_like(self.kernel))
-            self.var_weights["bias"] = nn.Parameter(torch.zeros_like(self.bias))
+            self.var_weights["kernel"] = nn.Parameter(torch.zeros_like(self.default_kernel))
+            self.var_weights["bias"] = nn.Parameter(torch.zeros_like(self.default_bias))
 
         self.bn = nn.BatchNorm2d(out_ch)
         if self.model_config.separate_bn_vars:
@@ -798,9 +801,18 @@ class ConvLayer(BaseCNNLayer):
             bias = selected_weights.get("bias", None)
 
         if kernel is None:
-            kernel = self.kernel
-        if bias is None and hasattr(self, "bias"):
-            bias = self.bias
+            if hasattr(self, "default_kernel"):
+                kernel = self.default_kernel
+            else:
+                kernel = nn.Parameter(torch.empty(self.output_dim, inputs.shape[1], self.kernel_size, self.kernel_size))
+                nn.init.kaiming_normal_(kernel, mode="fan_out", nonlinearity="relu")
+        if bias is None:
+            if hasattr(self, "default_bias"):
+                bias = self.default_bias
+            else:
+                bias = nn.Parameter(torch.zeros(inputs.shape[1]))
+        self.kernel = kernel
+        self.bias = bias
 
         # conv
         if self.padding == "same":
@@ -811,8 +823,8 @@ class ConvLayer(BaseCNNLayer):
             )
         x = F.conv2d(
             inputs,
-            kernel,
-            bias=bias,
+            weight=kernel,
+            bias=bias if self.generate_bias else None,
             stride=self.stride,
             padding=self.padding,
         )
@@ -823,16 +835,23 @@ class ConvLayer(BaseCNNLayer):
 
         gamma = None
         beta = None
+        bn_layer = None
         if evaluation and separate_bn_variables:
-            bn_layer = self.bn_eval
+            if hasattr(self, "bn_eval"):
+                bn_layer = self.bn_eval
+            else:
+                bn_layer = nn.BatchNorm2d(self.output_dim, affine=self.generate_bn)
             if self.add_trainable_weights:
                 gamma = selected_weights.get("gamma_eval", None)
-                beta  = selected_weights.get("beta_eval", None)
+                beta = selected_weights.get("beta_eval", None)
         else:
-            bn_layer = self.bn
+            if hasattr(self, "bn"):
+                bn_layer = self.bn
+            else:
+                bn_layer = nn.BatchNorm2d(self.output_dim, affine=self.generate_bn)
             if self.add_trainable_weights:
                 gamma = self.var_weights["gamma"]
-                beta  = self.var_weights["beta"]
+                beta = self.var_weights["beta"]
         if not self.generate_bn:
             x = bn_layer(x)
         elif self.add_trainable_weights:
@@ -890,8 +909,7 @@ class ConvLayer(BaseCNNLayer):
                 return kernel
 
         if name.endswith("bias"):
-            assert self.generate_bias
-            if self.generate_weights:
+            if self.generate_weights and self.generate_bias:
                 return torch.stack(
                     [w[self.conv_weight_size] for w in weights],
                     dim=0,
@@ -942,13 +960,13 @@ class LogitsLayer(BaseCNNLayer):
         self.num_features = num_features
 
         self.fe_kernel_size = fe_kernel_size
-        self.input_dim = -1
+        self.input_dim = 1
         self.initialized = False
 
     def _setup(self, inputs: torch.Tensor) -> None:
         """Input-specific setup."""
         # inputs -> [NCHW]
-        self.input_dim = int(inputs.shape[-1])
+        self.input_dim = int(inputs.shape[1])
 
         if self.num_features is None:
             self.num_features = self.input_dim
@@ -1026,7 +1044,7 @@ class FlattenLogitsLayer(LogitsLayer):
 
     def _setup(self, inputs: torch.Tensor) -> None:
         """Input-specific setup."""
-        self.input_dim = int(inputs.shape[-1])
+        self.input_dim = int(inputs.shape[1])
 
         width, height = int(inputs.shape[1]), int(inputs.shape[2])
 
@@ -1085,7 +1103,10 @@ class FlattenLogitsLayer(LogitsLayer):
 
 
 class LayerwiseModel(nn.Module):
-    """Model specification including layer builders."""
+    """Model specification including layer builders.
+
+    `list(model.layers[i].parameters())`
+    """
 
     def __init__(
         self,
@@ -1204,6 +1225,7 @@ class LayerwiseModel(nn.Module):
                 training=True,
                 separate_bn_variables=self.separate_bn_variables,
             )
+            # pdb.set_trace()
 
             # cnn_builder_heads
             if layer.head is not None:
