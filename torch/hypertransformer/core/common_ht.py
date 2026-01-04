@@ -188,6 +188,7 @@ class DatasetSamples:
     cnn_images: torch.Tensor # Query set
     cnn_labels: torch.Tensor
     cnn_real_classes: Optional[torch.Tensor]
+    randomize_fn: Callable[[], None]
     transformer_masks: Optional[torch.Tensor] = None
     real_class_min: Optional[int] = None
     real_class_max: Optional[int] = None

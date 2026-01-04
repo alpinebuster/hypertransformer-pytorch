@@ -212,7 +212,7 @@ def make_optimizer(optim_config: common.OptimizerConfig, model: nn.Module) -> tu
 
 
 def make_train_op(optimizer, loss, train_vars=None):
-    global_step = tf.train.get_or_create_global_step()
+    global_step = tf.get_or_create_global_step()
     return optimizer.minimize(
         tf.reduce_mean(loss), global_step=global_step, var_list=train_vars
     )
@@ -263,7 +263,7 @@ def make_loss(labels, predictions, heads: list):
     if len(losses) == 1:
         return losses[0], losses, [tf.constant(1.0, dtype=tf.float32)]
 
-    global_step = tf.cast(tf.train.get_or_create_global_step(), tf.float32)
+    global_step = tf.cast(tf.get_or_create_global_step(), tf.float32)
     loss, wamup_weights = _make_warmup_loss(losses[:-1], losses[-1], global_step)
     return loss, losses, wamup_weights
 
@@ -316,21 +316,20 @@ def create_layerwise_model(
 ):
     """Creates a hierarchical Transformer-CNN model."""
     logging.info("Building the model")
-    global_step = tf.train.get_or_create_global_step()
+    global_step = tf.get_or_create_global_step()
     model = layerwise.build_model(
         model_config.cnn_model_name,
         model_config=model_config,
     )
 
-
-    weight_blocks = model.train(
+    weight_blocks = model._train(
         dataset.transformer_images,
         dataset.transformer_labels,
         mask=dataset.transformer_masks,
         mask_random_samples=True,
         enable_fe_dropout=True,
     )
-    predictions = model.evaluate(
+    predictions = model._evaluate(
         dataset.cnn_images,
         weight_blocks=weight_blocks,
         training=False,
@@ -342,17 +341,16 @@ def create_layerwise_model(
         # layer_outputs[layer.name] => (inputs, head)
         heads = [output[1] for output in outputs if output[1] is not None]
 
-    test_weight_blocks = model.train(
+    test_weight_blocks = model._train(
         test_dataset.transformer_images,
         test_dataset.transformer_labels,
         mask=test_dataset.transformer_masks,
     )
-    test_predictions = model.evaluate(
+    test_predictions = model._evaluate(
         test_dataset.cnn_images,
         weight_blocks=test_weight_blocks,
         training=False,
     )
-
 
     labels = tf.one_hot(dataset.cnn_labels, depth=model_config.num_labels)
     pred_labels = tf.cast(tf.argmax(predictions, axis=-1), tf.int32)
@@ -420,8 +418,9 @@ def create_layerwise_model(
         )
 
     return common.TrainState(
+        model=None,
         train_op=make_train_op(optimizer, state.loss),
-        step_initializer=tf.group(dataset.randomize_op, test_dataset.randomize_op),
+        step_initializer=(dataset.randomize_fn, test_dataset.randomize_fn),
         large_summaries=[],
         small_summaries=summaries
         + [
@@ -443,36 +442,34 @@ def create_shared_feature_model(
     del test_dataset
     logging.info("Building the model")
 
-    global_step = tf.train.get_or_create_global_step()
-    model_builder = layerwise.build_model(
+    global_step = tf.get_or_create_global_step()
+    model = layerwise.build_model(
         model_config.cnn_model_name,
         model_config=model_config,
     )
 
-    with tf.variable_scope("model"):
-        weight_blocks = model_builder.train(
-            dataset.transformer_images,
-            dataset.transformer_labels,
-            mask=dataset.transformer_masks,
-            mask_random_samples=True,
-            enable_fe_dropout=True,
-            only_shared_feature=True,
-        )
+    weight_blocks = model._train(
+        dataset.transformer_images,
+        dataset.transformer_labels,
+        mask=dataset.transformer_masks,
+        mask_random_samples=True,
+        enable_fe_dropout=True,
+        only_shared_feature=True,
+    )
 
-    with tf.variable_scope("loss"):
-        shared_head_loss, shared_head_acc = _create_shared_head(
-            weight_blocks.shared_features,
-            dataset.transformer_real_classes,
-            dataset.real_class_min,
-            dataset.real_class_max,
-        )
-        assert shared_head_loss is not None
-        _, optimizer = make_optimizer(optim_config, global_step)
-        state.loss = shared_head_loss
+    shared_head_loss, shared_head_acc = _create_shared_head(
+        weight_blocks.shared_features,
+        dataset.transformer_real_classes,
+        dataset.real_class_min,
+        dataset.real_class_max,
+    )
+    assert shared_head_loss is not None
+    _, optimizer = make_optimizer(optim_config, global_step)
+    state.loss = shared_head_loss
 
     return common.TrainState(
         train_op=make_train_op(optimizer, state.loss),
-        step_initializer=tf.group(dataset.randomize_op),
+        step_initializer=dataset.randomize_fn,
         large_summaries=[],
         small_summaries=[
             tf.summary.scalar("loss/shared_head_loss", shared_head_loss),
@@ -562,7 +559,6 @@ def train(
     init_op = restore_shared_features()
     restored = common.init_training(train_state)
     if not restored and init_op is not None:
-        sess = tf.get_default_session()
         sess.run(init_op)
     common.train(train_config, train_state)
 

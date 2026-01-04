@@ -3,7 +3,6 @@
 import pytest
 import numpy as np
 import torch
-from torch.utils.data import Dataset
 
 from hypertransformer.core import datasets
 
@@ -12,20 +11,6 @@ from hypertransformer.core import datasets
 #   Class `TaskGenerator` Tests
 # ------------------------------------------------------------
 
-
-class FakeTorchDataset(Dataset):
-    def __init__(self, images: np.ndarray, labels: np.ndarray):
-        self.images = images
-        self.labels = labels
-
-    def __len__(self):
-        return len(self.labels)
-
-    def __getitem__(self, idx):
-        return {
-            "image": self.images[idx],  # (C, H, W)
-            "label": self.labels[idx],  # scalar
-        }
 
 def _make_data(batch_size: int, channels: int, image_size: int, num_labels: int) -> dict[int, np.ndarray]:
     assert batch_size % num_labels == 0
@@ -38,7 +23,7 @@ def _make_data(batch_size: int, channels: int, image_size: int, num_labels: int)
     )
     # [0,1,..,num_labels, ..., 0,1,..,num_labels]
     labels = np.array(list(range(num_labels))*repetitions, dtype=np.int32)
-    ds = FakeTorchDataset(images, labels)
+    ds = datasets.HTDataset(images, labels)
 
     return datasets.make_numpy_data(
         ds,

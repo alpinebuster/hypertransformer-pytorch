@@ -569,7 +569,9 @@ class TaskGenerator:
         for label, num_samples in label_generator():
             sample = self.data[label]
             chosen = np.random.choice(
-                range(sample.shape[0]), size=num_samples, replace=False
+                range(sample.shape[0]),
+                size=num_samples,
+                replace=False,
             )
             images.append(sample[chosen, :, :])
             chosen_labels = np.array([consecutive_label] * num_samples)
@@ -688,7 +690,13 @@ class TaskGenerator:
             labels = [torch.from_numpy(lbl) for lbl in labels]
             classes = [torch.from_numpy(cla) for cla in classes]
             # Processing and combining in batches
-            images = [config.process(image_mat) for image_mat in images]
+            if config.children:
+                images = [
+                    config.process(image_mat, idx)
+                    for idx, image_mat in enumerate(images)
+                ]
+            else:
+                images = [config.process(image_mat) for image_mat in images]
             images_labels.append(
                 (
                     torch.cat(images, dim=0), # (batch_size, H, W)
@@ -772,7 +780,7 @@ class HTDataset(Dataset):
 
 
 def make_numpy_data(
-    ds: Dataset,
+    ds: "HTDataset",
     batch_size: int,
     num_labels: int,
     samples_per_label: int,

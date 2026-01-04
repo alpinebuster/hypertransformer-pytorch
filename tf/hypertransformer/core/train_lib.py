@@ -97,10 +97,13 @@ def _load_cache(data_config: DatasetConfig) -> Optional[Dict[int, np.ndarray]]:
 
 
 def _make_numpy_array(data_config: DatasetConfig, batch_size: int, sess=None) -> Dict[int, np.ndarray]:
-    """Makes a NumPy array for given dataset configuration."""
-    # Dict[int, np.ndarray]:
-    #   int -> all_classes
-    #   np.ndarray -> [all_samples, W, H, C]
+    """Makes a NumPy array for given dataset configuration.
+
+    Return:
+       Dict[int, np.ndarray]:
+         int -> all_classes
+         np.ndarray -> [all_samples, H, W, C]
+    """
     output = None
     if sess is None:
         sess = tf.Session()

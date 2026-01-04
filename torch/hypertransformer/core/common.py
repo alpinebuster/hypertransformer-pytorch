@@ -4,12 +4,11 @@ import dataclasses
 import os
 import time
 
-from typing import Any, Callable, Optional, Text, Union, \
+from typing import Any, Callable, Optional, Union, \
     TypedDict
 from typing_extensions import Annotated
 
-from absl import flags
-from absl import logging
+from absl import flags, logging
 import numpy as np
 import torch
 import torch.nn as nn
@@ -57,8 +56,11 @@ class TrainState:
     """Model state."""
     model: torch.nn.Module
     optimizer: torch.optim.Optimizer
+    step_initializer: Union[
+        Callable[[], None],
+        tuple[Callable[[], None], ...],
+    ]
     global_step: int = 0
-
     summary_writer: Optional[util.MultiFileWriter] = None
     per_step_fn: Optional[Callable[[torch.Tensor, Any, Any], None]] = None
 
@@ -121,8 +123,6 @@ def _is_not_empty(tensor):
 
 def train(train_config: TrainConfig, state: TrainState, run_options=None) -> None:
     """Train loop."""
-    sess = tf.get_default_session()
-
     step = sess.run(state.global_step)
     first_step = step
     starting_time = time.time()
@@ -137,7 +137,11 @@ def train(train_config: TrainConfig, state: TrainState, run_options=None) -> Non
 
     while step <= train_config.train_steps:
         if state.step_initializer is not None:
-            sess.run(state.step_initializer, options=run_options)
+            if callable(state.step_initializer):
+                state.step_initializer()
+            else:
+                for fn in state.step_initializer:
+                    fn()
 
         to_run = {
             "step": state.global_step,
@@ -202,7 +206,7 @@ def init_training(state: TrainState) -> bool:
 
     restored = state.load_latest()
     if not restored:
-        print("No checkpoint found.")
+        logging.info("No checkpoint found.")
     else:
-        print(f"Restored from step {state.global_step}")
+        logging.info(f"Restored from step {state.global_step}")
     return restored

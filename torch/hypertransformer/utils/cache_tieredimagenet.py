@@ -3,7 +3,7 @@
 import os
 import pickle
 
-from absl import app
+from absl import app, logging
 from absl import flags
 
 import numpy as np
@@ -38,10 +38,11 @@ def _collect_images_by_label(images, labels):
 
 
 def _save_part(chunk_index, tensors):
+    tensors = tensors.transpose(0, 1, 4, 2, 3)
     records = len(tensors)
-    print(f"Chunk {chunk_index:03d}: {records} records.")
+    logging.info(f"Chunk {chunk_index:03d}: {records} records.")
     np.save(
-        os.path.join(OUTPUT_PATH.value, SUBFOLDER, f"chunk_{chunk_index:03d}"), tensors
+        os.path.join(OUTPUT_PATH.value, SUBFOLDER, f"chunk_{chunk_index:03d}"), tensors,
     )
 
 
@@ -57,7 +58,7 @@ def collect_and_save(prefix, start_idx, chunk_index=0, num_combine=42):
         label_idx = start_idx + index
         labels.append(label_idx)
         if (index + 1) % num_combine == 0:
-            print(f"Saving labels {saved_labels} to chunk {chunk_index}")
+            logging.info(f"Saving labels {saved_labels} to chunk {chunk_index}")
             _save_part(chunk_index, tensors)
             chunk_index += 1
             tensors = []
@@ -66,7 +67,7 @@ def collect_and_save(prefix, start_idx, chunk_index=0, num_combine=42):
         saved_labels.append(label_idx)
 
     if tensors:
-        print(f"Saving labels {saved_labels} to chunk {chunk_index}")
+        logging.info(f"Saving labels {saved_labels} to chunk {chunk_index}")
         _save_part(chunk_index, tensors)
         chunk_index += 1
 
@@ -80,7 +81,7 @@ def main(argv):
     try:
         os.makedirs(os.path.join(OUTPUT_PATH.value, SUBFOLDER))
     except FileExistsError:
-        print("Output folder already exists.")
+        logging.info("Output folder already exists.")
 
     label_index = 0
     chunk_index = 0

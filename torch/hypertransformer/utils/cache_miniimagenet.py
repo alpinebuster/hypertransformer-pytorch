@@ -56,11 +56,12 @@ def main(argv):
         raise app.UsageError("Too many command-line arguments.")
     data = get_data(INPUT_PATH.value)
     combined = get_combined(data)
-    assert combined.shape == (100, 600, 84, 84, 3)
+    combined_ch_first = combined.transpose(0, 1, 4, 2, 3)
+    assert combined_ch_first.shape == (100, 600, 3, 84, 84)
     try:
         os.makedirs(OUTPUT_PATH.value, exist_ok=True)
     finally:
-        np.save(os.path.join(OUTPUT_PATH.value, "miniimagenet"), combined)
+        np.save(os.path.join(OUTPUT_PATH.value, "miniimagenet"), combined_ch_first)
 
 
 if __name__ == "__main__":
