@@ -149,6 +149,7 @@ def test_augmentation(config: dict):
     )
 
     images = torch.ones((4, 1, 8, 8))
+    aug_config.randomize()
     out = aug_config.process(images)
 
     assert out.shape == images.shape

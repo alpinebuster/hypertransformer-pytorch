@@ -8,10 +8,9 @@ from typing import TYPE_CHECKING, Optional, Callable, Any
 
 import torch
 import torch.nn.functional as F
-from torch.utils.data import Dataset
 
 if TYPE_CHECKING:
-    from hypertransformer.core.layerwise import GeneratedWeights
+    from hypertransformer.core.datasets import HTDataset
 
 
 @dataclasses.dataclass
@@ -31,7 +30,7 @@ class DatasetConfig:
     ds_split: str = "train"
     meta_dataset_split: str = "train"
     data_dir: Optional[str] = None
-    ds: Optional[Dataset] = None
+    ds: Optional["HTDataset"] = None
     dataset_info: Optional[DatasetInfo] = None
     per_label_augmentation: bool = False
     cache_path: str = ""
@@ -189,7 +188,6 @@ class DatasetSamples:
     cnn_images: torch.Tensor # Query set
     cnn_labels: torch.Tensor
     cnn_real_classes: Optional[torch.Tensor]
-    randomize_op: Any
     transformer_masks: Optional[torch.Tensor] = None
     real_class_min: Optional[int] = None
     real_class_max: Optional[int] = None

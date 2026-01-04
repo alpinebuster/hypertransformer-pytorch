@@ -360,8 +360,8 @@ class AugmentationConfig:
 
     def _aug_roll(self, images):
         """Smooths the image using a 5x5 uniform kernel."""
-        width, height = images.shape[1], images.shape[2]
-        width, height = tf.cast(width, tf.float32), tf.cast(height, tf.float32)
+        height, width = images.shape[1], images.shape[2]
+        height, width = tf.cast(height, tf.float32), tf.cast(width, tf.float32)
         x = tf.cast(self.roll_x.value * width, tf.int32)
         y = tf.cast(self.roll_y.value * height, tf.int32)
         return tf.roll(images, [x, y], axis=[1, 2])

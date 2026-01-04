@@ -3,6 +3,7 @@
 import dataclasses
 import functools
 import random
+import math
 
 from typing import Any, Callable, Generator, \
     Optional, Tuple, Union, Mapping
@@ -21,11 +22,6 @@ DatasetInfo = common_ht.DatasetInfo
 
 UseLabelSubset = Union[list[int], Callable[[], list[int]]]
 LabelGenerator = Generator[Tuple[int|np.ndarray, int], None, None]
-SupervisedSamples = Tuple[
-    list[torch.Tensor],
-    list[torch.Tensor],
-    list[torch.Tensor],
-]
 SupervisedSamplesNumpy = Tuple[
     list[np.ndarray],
     list[np.ndarray],
@@ -298,155 +294,218 @@ class RandomizedAugmentationConfig:
     roll_range: float = 0.3
     rotate_by_90: bool = False
 
+@dataclasses.dataclass
+class _RandomValue:
+    value: Optional[float] = None
+
+    def assign_bool(self, prob: float):
+        self.value = random.random() < prob
+
+    def assign_uniform(self, scale: float):
+        self.value = random.uniform(-scale, scale)
+
 class _RandomRoll(nn.Module):
-    def __init__(self, prob=0.0, roll_range=0.3):
+    def __init__(self, prob=0.0, roll_x=0., roll_y=0.):
         super().__init__()
         self.prob = prob
-        self.roll_range = roll_range
+        self.roll_x = roll_x
+        self.roll_y = roll_y
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if torch.rand(size=[1]) > self.prob:
+        if torch.rand(size=[1]).item() > self.prob:
             return x
 
-        _, h, w = x.shape
-        dx = int((torch.rand(1)*2 - 1) * self.roll_range * h)
-        dy = int((torch.rand(1)*2 - 1) * self.roll_range * w)
-        return torch.roll(x, shifts=(dx, dy), dims=(1, 2))
+        if x.dim() == 4:
+            _, _, H, W = x.shape
+            dims = (2, 3)
+        elif x.dim() == 3:
+            _, H, W = x.shape
+            dims = (1, 2)
+        else:
+            raise ValueError("Input tensor must be 3D or 4D")
+
+        dx = int(self.roll_x * H)
+        dy = int(self.roll_y * W)
+        return torch.roll(x, shifts=(dx, dy), dims=dims)
 
 class _RandomResizedCropSameSize(nn.Module):
-    def __init__(self, prob=0.0, scale=(0.7, 1.0)):
+    def __init__(self, prob=0.0, size=1.0):
         super().__init__()
         self.prob = prob
-        self.scale = scale
+        self.size = size
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if torch.rand(1) > self.prob:
+        if torch.rand(1).item() > self.prob:
             return x
 
-        _, h, w = x.shape
+        # BCHW, H = W
+        H = int(x.shape[-1])
+        # re_size ∈ [H*(1-MAX_RESIZE), H]
+        re_size = H * (1 - MAX_RESIZE / 2 + MAX_RESIZE * self.size / 2)
+
         return T.RandomResizedCrop(
-            size=(h, w),
-            scale=self.scale,
+            size=(H, H),
+            scale=(re_size, re_size),
         )(x)
 
 @dataclasses.dataclass
 class AugmentationConfig:
-    """Configuration of the image augmentation generator."""
+    """Configuration of the image augmentation generator.
 
-    def __init__(self, random_config: RandomizedAugmentationConfig):
-        self.random_config = random_config
-        self.transform = self._build_transform()
+           TF1:                    PyTorch:
+       +----------------+      +----------------+
+       | randomize_op() | ---> | randomize()    |  ← Step-level randomization
+       +----------------+      +----------------+
+               |                       |
+               v                       v
+       +----------------+      +----------------+
+       | process(images)| ---> | process(images)|  ← Read the random state
+       +----------------+      +----------------+
+               |                       |
+          output images          output images
+    """
 
-    def randomize_op(self, img: torch.Tensor) -> torch.Tensor:
-        """Apply random augmentations directly on a single image tensor [C,H,W]."""
+    random_config: Optional[RandomizedAugmentationConfig] = None
+
+    rotate: _RandomValue = dataclasses.field(default_factory=_RandomValue)
+    smooth: _RandomValue = dataclasses.field(default_factory=_RandomValue)
+    contrast: _RandomValue = dataclasses.field(default_factory=_RandomValue)
+    negate: _RandomValue = dataclasses.field(default_factory=_RandomValue)
+    roll: _RandomValue = dataclasses.field(default_factory=_RandomValue)
+    resize: _RandomValue = dataclasses.field(default_factory=_RandomValue)
+
+    angle: _RandomValue = dataclasses.field(default_factory=_RandomValue)
+    alpha: _RandomValue = dataclasses.field(default_factory=_RandomValue)
+    size: _RandomValue = dataclasses.field(default_factory=_RandomValue)
+    roll_x: _RandomValue = dataclasses.field(default_factory=_RandomValue)
+    roll_y: _RandomValue = dataclasses.field(default_factory=_RandomValue)
+    rotate_90_times: _RandomValue = dataclasses.field(default_factory=_RandomValue)
+
+    children: list["AugmentationConfig"] = dataclasses.field(default_factory=list)
+
+    def __post_init__(self):
+        if self.children:
+            return
+
+        for name in ["rotate", "smooth", "contrast", "negate", "resize", "roll"]:
+            attr = getattr(self, name)
+            if attr.value is None:
+                attr.value = False # Default bool: False
+        for name in [
+            "angle",
+            "alpha",
+            "size",
+            "roll_x",
+            "roll_y",
+            "rotate_90_times",
+        ]:
+            attr = getattr(self, name)
+            if attr.value is None:
+                attr.value = 0.0  # Default float: 0.0
+
+    def randomize(self):
+        if self.children:
+            for child in self.children:
+                child.randomize()
+            return
+
+        if self.random_config is None:
+            return
+
         cfg = self.random_config
-        img_aug = img.clone()
 
-        if cfg.rotate_by_90 and random.random() < cfg.rotation_probability:
-            times = random.randint(0, 3)
-            img_aug = torch.rot90(img_aug, k=times, dims=(1, 2))
+        self.rotate.assign_bool(cfg.rotation_probability)
+        self.smooth.assign_bool(cfg.smooth_probability)
+        self.contrast.assign_bool(cfg.contrast_probability)
+        self.negate.assign_bool(cfg.negate_probability)
+        self.resize.assign_bool(cfg.resize_probability)
+        self.roll.assign_bool(cfg.roll_probability)
 
-        if random.random() < cfg.rotation_probability:
-            angle = random.uniform(-cfg.angle_range, cfg.angle_range)
-            img_aug = TF.rotate(img_aug, angle)
+        self.angle.assign_uniform(cfg.angle_range)
 
-        if random.random() < cfg.smooth_probability:
-            img_aug = TF.gaussian_blur(img_aug, kernel_size=[3, 3])
+        self.size.assign_uniform(1.0)
+        self.alpha.assign_uniform(1.0)
 
-        if random.random() < cfg.contrast_probability:
-            factor = random.uniform(0.5, 1.5)
-            img_aug = TF.adjust_contrast(img_aug, factor)
+        # [-roll_range, +roll_range)
+        self.roll_x.assign_uniform(cfg.roll_range)
+        self.roll_y.assign_uniform(cfg.roll_range)
 
-        if random.random() < cfg.negate_probability:
-            img_aug = 1.0 - img_aug
-
-        if random.random() < cfg.resize_probability:
-            scale = random.uniform(0.7, 1.0)
-            _, H, W = img_aug.shape
-            new_H = int(H * scale)
-            new_W = int(W * scale)
-            img_aug = TF.resize(img_aug, [new_H, new_W])
-            img_aug = TF.resize(img_aug, [H, W])
-
-        if random.random() < cfg.roll_probability:
-            shift_x = int(img_aug.shape[2] * random.uniform(-cfg.roll_range, cfg.roll_range))
-            shift_y = int(img_aug.shape[1] * random.uniform(-cfg.roll_range, cfg.roll_range))
-            img_aug = torch.roll(img_aug, shifts=(shift_y, shift_x), dims=(1, 2))
-
-        return img_aug
+        # TF: scale=2.0 → U(-2, 2)
+        self.rotate_90_times.assign_uniform(2.0)
 
     def _build_transform(self) -> T.Compose:
         cfg = self.random_config
         transforms: list[Callable[[torch.Tensor], torch.Tensor]] = []
+        if cfg is None:
+            return T.Compose(transforms)
 
-        if cfg.rotate_by_90:
+        if cfg.rotate_by_90 and self.rotate_90_times.value:
+            # -> 0..3
+            k = int(math.floor(self.rotate_90_times.value + 2.0)) % 4
+            angle = k * 90
+            # When passing [angle, angle], it means "randomly select an angle within the [angle, angle] interval", 
+            # with the interval length being 0. The result is that each rotation is fixed at `angle`
+            transforms.append(T.RandomRotation([angle, angle]))
+
+        if cfg.rotation_probability > 0. and self.rotate.value:
             transforms.append(
-                T.RandomRotation([0, 90, 180, 270])
+                T.RandomRotation([self.angle.value, self.angle.value]) # In degree
             )
 
-        if cfg.rotation_probability > 0:
-            transforms.append(
-                T.RandomApply(
-                    [T.RandomRotation(cfg.angle_range)],
-                    p=cfg.rotation_probability,
-                )
-            )
+        if cfg.smooth_probability > 0. and self.smooth.value:
+            transforms.append(T.GaussianBlur(kernel_size=3))
 
-        if cfg.smooth_probability > 0:
-            transforms.append(
-                T.RandomApply(
-                    [T.GaussianBlur(kernel_size=3)],
-                    p=cfg.smooth_probability,
-                )
-            )
+        if cfg.contrast_probability > 0. and self.contrast.value:
+            transforms.append(T.ColorJitter(contrast=0.5))
 
-        if cfg.contrast_probability > 0:
-            transforms.append(
-                T.RandomApply(
-                    [T.ColorJitter(contrast=0.5)],
-                    p=cfg.contrast_probability,
-                )
-            )
-
-        if cfg.resize_probability > 0:
+        if cfg.resize_probability > 0. and self.resize.value and self.size.value is not None:
             transforms.append(
                 _RandomResizedCropSameSize(
-                    prob=cfg.resize_probability,
-                    scale=(0.7, 1.0),
+                    prob=1.,
+                    size=self.size.value,
                 )
             )
 
-        if cfg.negate_probability > 0:
-            transforms.append(
-                T.RandomApply(
-                    [T.RandomInvert(p=1.0)],
-                    p=cfg.negate_probability,
-                )
-            )
+        if cfg.negate_probability > 0. and self.negate.value:
+            transforms.append(T.RandomInvert(p=1.))
 
-        if cfg.roll_probability > 0:
+        if (
+            cfg.roll_probability > 0. and
+            self.roll.value and
+            self.roll_x.value is not None and
+            self.roll_y.value is not None
+        ):
             transforms.append(
                 _RandomRoll(
-                    prob=cfg.roll_probability,
-                    roll_range=cfg.roll_range,
+                    prob=1.,
+                    roll_x=self.roll_x.value,
+                    roll_y=self.roll_y.value,
                 )
             )
 
         return T.Compose(transforms)
 
-    def process(self, images: Union[torch.Tensor, np.ndarray]) -> torch.Tensor:
+    def process(
+        self,
+        images: Union[torch.Tensor, np.ndarray],
+        index: Optional[int] = None,
+    ) -> torch.Tensor:
         """
         images: [B, C, H, W]
 
         Return: 
            [B, C, H, W]
         """
+        if index is not None:
+            return self.children[index].process(images)
+
         if isinstance(images, torch.Tensor):
             imgs = images
         else:
             imgs = torch.from_numpy(images)
 
         # BCHW
+        self.transform = self._build_transform()
         out = []
         for img in imgs:
             out.append(self.transform(img))
@@ -582,7 +641,7 @@ class TaskGenerator:
         batch_sizes: list[int],
         config: AugmentationConfig,
         num_unlabeled_per_class: list[int],
-    ) -> list[SupervisedSamples]:
+    ) -> list[SupervisedSample]:
         """Generator producing multiple separate balanced batches of data.
 
         Arguments:
@@ -615,7 +674,7 @@ class TaskGenerator:
             num_unlabeled_per_class=num_unlabeled_per_class,
         )
 
-        images_labels = []
+        images_labels: list[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = []
         offs = 0
         for _ in batch_sizes:
             images = output[offs : offs + self.num_labels]
@@ -639,7 +698,7 @@ class TaskGenerator:
             )
 
         # Shuffling each batch
-        output_batches: list[SupervisedSamples] = []
+        output_batches: list[SupervisedSample] = []
         for images, labels, classes in images_labels:
             perm = torch.randperm(images.size(0), device=images.device)
             images = images[perm]
@@ -678,6 +737,38 @@ class TaskGenerator:
         classes = classes[perm]
 
         return images, labels, classes
+
+
+class HTDataset(Dataset):
+    """
+    e.g.
+       ```python
+       assert batch_size % num_labels == 0
+       repetitions = batch_size // num_labels
+
+       # (batch_size, channels, image_size, image_size)
+       images = np.zeros(
+           (batch_size, channels, image_size, image_size),
+           dtype=np.float32,
+       )
+       # [0,1,..,num_labels, ..., 0,1,..,num_labels]
+       labels = np.array(list(range(num_labels))*repetitions, dtype=np.int32)
+       ds = FakeTorchDataset(images, labels)
+    ```
+    """
+
+    def __init__(self, images: np.ndarray, labels: np.ndarray):
+        self.images = images
+        self.labels = labels
+
+    def __len__(self):
+        return len(self.labels)
+
+    def __getitem__(self, idx):
+        return {
+            "image": self.images[idx],  # (C, H, W)
+            "label": self.labels[idx],  # scalar
+        }
 
 
 def make_numpy_data(

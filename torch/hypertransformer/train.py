@@ -530,14 +530,13 @@ def train(
     """Main function training the model."""
     state = train_lib.ModelState()
     logging.info("Creating the dataset")
-    dataset, dataset_state = train_lib.make_dataset(
+    dataset = train_lib.make_dataset(
         model_config=layerwise_model_config,
         data_config=dataset_config,
     )
-    test_dataset, _ = train_lib.make_dataset(
+    test_dataset = train_lib.make_dataset(
         model_config=layerwise_model_config,
         data_config=test_dataset_config,
-        dataset_state=dataset_state,
     )
     args = {
         "dataset": dataset,
@@ -559,13 +558,13 @@ def train(
 
     logging.info("Training")
     train_state = create_model(**args)
-    with tf.Session():
-        init_op = restore_shared_features()
-        restored = common.init_training(train_state)
-        if not restored and init_op is not None:
-            sess = tf.get_default_session()
-            sess.run(init_op)
-        common.train(train_config, train_state)
+
+    init_op = restore_shared_features()
+    restored = common.init_training(train_state)
+    if not restored and init_op is not None:
+        sess = tf.get_default_session()
+        sess.run(init_op)
+    common.train(train_config, train_state)
 
 
 def main(argv):

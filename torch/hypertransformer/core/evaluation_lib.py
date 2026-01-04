@@ -98,7 +98,6 @@ def evaluate_dataset(
     eval_config: EvaluationConfig
 ) -> Accuracies:
     """Runs evaluation loop for a specific dataset."""
-    sess = tf.get_default_session()
     test_accs = {}
     all_accs = []
 
@@ -106,7 +105,6 @@ def evaluate_dataset(
         if custom_labels:
             np.random.shuffle(custom_labels)
 
-        sess.run(dataset.randomize_op)
         # Assign op should be executed last for us to have the same augmentation
         # and labels for both Transformer and CNN samples
         if assign_op is not None:

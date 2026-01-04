@@ -2,6 +2,8 @@
     "cSpell.words": [
         "absl",
         "avgpool",
+        "BCHW",
+        "BHWC",
         "ckpts",
         "convs",
         "embs",

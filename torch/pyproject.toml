@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "hypertransformer"
-version = "0.5.1"
+version = "0.6.0"
 description = "Pytorch implementation of (Continual) HyperTransformer."
 authors = ["__z__ <imzqqq@hotmail.com>"]
 license = "AGPL-3.0-or-later"
@@ -29,7 +29,7 @@ priority = "explicit"
 python = ">=3.12,<3.15"
 ipykernel = "^7.1.0"
 pytest = "^9.0.2"
-setuptools_rust = ">=1.11.1"
+setuptools_rust = ">=1.12.0"
 attrs = "^25.4.0"
 numpy = "^2.4.0"
 fastai = "^2.8.2"
@@ -79,9 +79,8 @@ torch = [
 
 # `poetry install --with llm`
 [tool.poetry.group.llm.dependencies]
-safetensors = "^0.5.3"
+safetensors = "^0.7.0"
 transformers = "^4.57.3"
-triton = "^3.5.1"
 
 [build-system]
 requires = ["poetry-core"]
