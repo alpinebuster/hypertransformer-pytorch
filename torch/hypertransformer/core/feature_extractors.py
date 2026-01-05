@@ -4,12 +4,15 @@ import functools
 
 from typing import cast, Optional
 
+from absl import flags, logging
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from hypertransformer.core.common_ht import LayerwiseModelConfig
 from hypertransformer.core.util import same_pad_2d
+
+FLAGS = flags.FLAGS
 
 
 class FeatureExtractor(nn.Module):
@@ -245,6 +248,46 @@ class PassthroughFeatureExtractor(FeatureExtractor):
             # [B, CHW + D]
             output = torch.cat([output, wrapped], dim=-1)
         return output
+
+
+class SharedHead(nn.Module):
+    def __init__(
+        self,
+        shared_features_dim: int,
+        real_class_min: int,
+        real_class_max: int,
+        label_smoothing: float = 0.,
+    ):
+        super().__init__()
+        self.real_class_min = real_class_min
+        self.real_class_max = real_class_max
+        self.total_classes = real_class_max - real_class_min + 1
+        self.label_smoothing = label_smoothing
+
+        # Default to `FLAGS.shared_features_dim`
+        self.fc = nn.Linear(shared_features_dim, self.total_classes)
+
+    def forward(
+        self,
+        shared_features: torch.Tensor,   # (B, shared_features_dim)
+        real_classes: torch.Tensor,      # (B,)
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        logits = self.fc(shared_features)  # (B, total_classes)
+        # Class index normalization
+        classes = real_classes - self.real_class_min  # (B,)
+
+        # loss (TF softmax_cross_entropy ≈ PyTorch cross_entropy)
+        loss = F.cross_entropy(
+            logits,
+            classes,
+            label_smoothing=self.label_smoothing,
+        )
+
+        # accuracy
+        preds = torch.argmax(logits, dim=-1)
+        accuracy = (preds == classes).float().mean()
+
+        return loss, accuracy
 
 
 def fe_multi_layer(config: LayerwiseModelConfig, num_layers=2, use_bn=False):

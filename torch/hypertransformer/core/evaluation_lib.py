@@ -52,7 +52,7 @@ def dataset_with_custom_labels(
     dataset_config = dataclasses.replace(
         dataset_config, use_label_subset=lambda: custom_labels
     )
-    dataset, _ = train_lib.make_dataset(
+    dataset = train_lib.make_dataset(
         model_config=model_config,
         data_config=dataset_config,
         shuffle_labels=False,
@@ -126,12 +126,15 @@ def apply_layerwise_model(
 ):
     """Applies a layerwise model to a dataset."""
     with tf.variable_scope("model"):
-        weight_blocks = model.train(
+        weight_blocks = model._train(
             dataset.transformer_images,
             dataset.transformer_labels,
             mask=dataset.transformer_masks,
         )
-        predictions = model.evaluate(dataset.cnn_images, weight_blocks=weight_blocks)
+        predictions = model._evaluate(
+            dataset.cnn_images,
+            weight_blocks=weight_blocks,
+        )
 
     pred_labels = tf.cast(tf.argmax(predictions, axis=-1), tf.int32)
     accuracy = tf.cast(tf.math.equal(dataset.cnn_labels, pred_labels), tf.float32)

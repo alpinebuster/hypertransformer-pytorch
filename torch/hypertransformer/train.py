@@ -8,6 +8,7 @@ from absl import app, flags, logging
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 
@@ -101,6 +102,7 @@ def make_layerwise_model_config():
         shared_features_dim=FLAGS.shared_features_dim,
         separate_bn_vars=FLAGS.separate_evaluation_bn_vars,
         shared_feature_extractor_padding=FLAGS.shared_feature_extractor_padding,
+        label_smoothing=FLAGS.label_smoothing,
         generator=FLAGS.layerwise_generator,
         train_heads=FLAGS.warmup_steps > 0,
         max_prob_remove_unlabeled=FLAGS.max_prob_remove_unlabeled,
@@ -189,7 +191,7 @@ def make_test_dataset_config(dataset_spec=""):
 # ------------------------------------------------------------
 
 
-def make_optimizer(optim_config: common.OptimizerConfig, model: nn.Module) -> tuple[Optimizer, LRScheduler]:
+def _make_optimizer(optim_config: common.OptimizerConfig, model: nn.Module) -> tuple[Optimizer, LRScheduler]:
     optimizer = torch.optim.SGD(
         model.parameters(),
         lr=optim_config.learning_rate,
@@ -211,14 +213,17 @@ def make_optimizer(optim_config: common.OptimizerConfig, model: nn.Module) -> tu
     return optimizer, scheduler
 
 
-def make_train_op(optimizer, loss, train_vars=None):
-    global_step = tf.get_or_create_global_step()
+def _make_train_op(optimizer, loss, train_vars=None):
     return optimizer.minimize(
         tf.reduce_mean(loss), global_step=global_step, var_list=train_vars
     )
 
 
-def _make_warmup_loss(loss_heads, loss_prediction, global_step):
+def _make_warmup_loss(
+    loss_heads: list[torch.Tensor],
+    loss_prediction: torch.Tensor,
+    global_step: int,
+) -> tuple[torch.Tensor, list[torch.Tensor]]:
     """Uses head losses to build aggregate loss cycling through them."""
     # The warmup period is broken into a set of "head activation periods".
     # Each period, one head weight is linearly growing, while the previous
@@ -235,35 +240,52 @@ def _make_warmup_loss(loss_heads, loss_prediction, global_step):
 
     for stage, head_loss in enumerate(loss_heads):
         target_steps = stage * steps_per_stage
-        norm_step_dist = tf.abs(global_step - target_steps) / steps_per_stage
+        norm_step_dist = torch.abs(global_step - target_steps) / steps_per_stage
         # This weight starts at 0 and peaks reaching 1 at `target_steps`. It then
         # decays linearly to 0 and stays 0.
-        weight = tf.maximum(0.0, 1.0 - norm_step_dist)
+        # weight = max(0, 1 - norm_step_dist)
+        weight = torch.clamp(1.0 - norm_step_dist, min=0.0)
         weights.append(weight)
         loss += weight * head_loss
 
     target_steps = num_heads * steps_per_stage
     norm_step_dist = 1.0 + (global_step - target_steps) / steps_per_stage
-    norm_step_dist = tf.nn.relu(norm_step_dist)
+    norm_step_dist = torch.relu(norm_step_dist)
     # Weight for the actual objective linearly grows after the final layer head
     # peaks and then stays equal to 1.
-    weight = tf.minimum(1.0, norm_step_dist)
+    # weight = min(1, norm_step_dist)
+    weight = torch.clamp(norm_step_dist, max=1.0)
     weights.append(weight)
     loss += weight * loss_prediction
+
     return loss, weights
 
-def make_loss(labels, predictions, heads: list):
-    """Makes a full loss including head 'warmup' losses."""
-    losses = []
+def _make_loss(
+    labels: torch.Tensor,
+    predictions: torch.Tensor,
+    heads: list[torch.Tensor],
+    global_step: int,
+    label_smoothing: float = 0.
+) -> tuple[torch.Tensor, list[torch.Tensor], list[torch.Tensor]]:
+    """Makes a full loss including head 'warmup' losses.
+
+    Returns:
+       loss: Scalar tensor
+       losses: List of scalar tensors
+       warmup_weights: List of scalar tensors
+    """
+    losses: list[torch.Tensor] = []
+
     for head in heads + [predictions]:
-        head_loss = tf.losses.softmax_cross_entropy(
-            labels, head, label_smoothing=FLAGS.label_smoothing
+        head_loss = F.cross_entropy(
+            head,
+            labels,
+            label_smoothing=label_smoothing,
         )
         losses.append(head_loss)
     if len(losses) == 1:
-        return losses[0], losses, [tf.constant(1.0, dtype=tf.float32)]
+        return losses[0], losses, [torch.tensor(1.0, device=losses[0].device)]
 
-    global_step = tf.cast(tf.get_or_create_global_step(), tf.float32)
     loss, wamup_weights = _make_warmup_loss(losses[:-1], losses[-1], global_step)
     return loss, losses, wamup_weights
 
@@ -273,50 +295,16 @@ def make_loss(labels, predictions, heads: list):
 # ------------------------------------------------------------
 
 
-def _create_shared_head(
-    shared_features,
-    real_classes,
-    real_class_min: Optional[int],
-    real_class_max: Optional[int]
-):
-    """Creates a real class prediction head from the shared feature."""
-    if real_classes is None or shared_features is None:
-        return None, None
-    if real_class_min is None or real_class_max is None:
-        logging.warning(
-            "Training classes boundaries are not provided. "
-            "Skipping shared head creation!"
-        )
-        return None, None
-
-    total_classes = real_class_max - real_class_min + 1
-    with tf.variable_scope("shared_head", reuse=tf.AUTO_REUSE):
-        fc = tf.layers.Dense(units=total_classes, name="fc")
-        predictions = fc(shared_features)
-
-    classes = real_classes - real_class_min
-    one_hot_gt = tf.one_hot(classes, depth=total_classes)
-    loss = tf.losses.softmax_cross_entropy(
-        one_hot_gt, predictions, label_smoothing=FLAGS.label_smoothing
-    )
-    pred_classes = tf.cast(tf.argmax(predictions, axis=-1), tf.int32)
-    accuracy = tf.cast(tf.math.equal(classes, pred_classes), tf.float32)
-    num_samples = tf.cast(tf.shape(shared_features)[0], tf.float32)
-    accuracy = tf.reduce_sum(accuracy) / num_samples
-
-    return loss, accuracy
-
-
 def create_layerwise_model(
     model_config: common_ht.LayerwiseModelConfig,
     dataset: common_ht.DatasetSamples,
     test_dataset: common_ht.DatasetSamples,
-    state: train_lib.ModelState,
+    model_state: train_lib.ModelState,
     optim_config: common.OptimizerConfig,
 ):
     """Creates a hierarchical Transformer-CNN model."""
     logging.info("Building the model")
-    global_step = tf.get_or_create_global_step()
+
     model = layerwise.build_model(
         model_config.cnn_model_name,
         model_config=model_config,
@@ -332,7 +320,6 @@ def create_layerwise_model(
     predictions = model._evaluate(
         dataset.cnn_images,
         weight_blocks=weight_blocks,
-        training=False,
     )
 
     heads = []
@@ -349,7 +336,6 @@ def create_layerwise_model(
     test_predictions = model._evaluate(
         test_dataset.cnn_images,
         weight_blocks=test_weight_blocks,
-        training=False,
     )
 
     labels = tf.one_hot(dataset.cnn_labels, depth=model_config.num_labels)
@@ -379,23 +365,18 @@ def create_layerwise_model(
             tf.summary.scalar("loss/regularization", tf.reduce_sum(reg_losses))
         )
 
-    shared_head_loss, shared_head_acc = _create_shared_head(
-        weight_blocks.shared_features,
-        dataset.transformer_real_classes,
-        dataset.real_class_min,
-        dataset.real_class_max,
-    )
+    shared_head_loss, shared_head_acc = model.shared_head_outputs.values()
 
-    state.loss, _, warmup_weights = make_loss(labels, predictions, heads)
-    summaries.append(tf.summary.scalar("loss/ce", state.loss))
+    model_state.loss, _, warmup_weights = _make_loss(labels, predictions, heads)
+    summaries.append(tf.summary.scalar("loss/ce", model_state.loss))
     if reg_losses:
-        state.loss += tf.reduce_sum(reg_losses)
-    _, optimizer = make_optimizer(optim_config, global_step)
+        model_state.loss += tf.reduce_sum(reg_losses)
+    _, optimizer = _make_optimizer(optim_config, global_step)
 
     if shared_head_loss is not None:
         if model_config.shared_head_weight > 0.0:
             weighted_head_loss = shared_head_loss * model_config.shared_head_weight
-            state.loss += weighted_head_loss
+            model_state.loss += weighted_head_loss
             summaries.append(
                 tf.summary.scalar("loss/shared_head_loss", shared_head_loss)
             )
@@ -419,14 +400,14 @@ def create_layerwise_model(
 
     return common.TrainState(
         model=None,
-        train_op=make_train_op(optimizer, state.loss),
+        train_op=_make_train_op(optimizer, model_state.loss),
         step_initializer=(dataset.randomize_fn, test_dataset.randomize_fn),
         large_summaries=[],
         small_summaries=summaries
         + [
             tf.summary.scalar("accuracy/accuracy", accuracy),
             tf.summary.scalar("accuracy/test_accuracy", test_accuracy),
-            tf.summary.scalar("loss/loss", state.loss),
+            tf.summary.scalar("loss/loss", model_state.loss),
         ],
     )
 
@@ -435,40 +416,26 @@ def create_shared_feature_model(
     model_config: common_ht.LayerwiseModelConfig,
     dataset: common_ht.DatasetSamples,
     test_dataset: common_ht.DatasetSamples,
-    state: train_lib.ModelState,
+    model_state: train_lib.ModelState,
     optim_config: common.OptimizerConfig,
 ):
     """Creates an image feature extractor model for pre-training."""
     del test_dataset
-    logging.info("Building the model")
+    logging.info("Building the model...")
 
-    global_step = tf.get_or_create_global_step()
     model = layerwise.build_model(
         model_config.cnn_model_name,
         model_config=model_config,
+        dataset=dataset,
     )
 
-    weight_blocks = model._train(
-        dataset.transformer_images,
-        dataset.transformer_labels,
-        mask=dataset.transformer_masks,
-        mask_random_samples=True,
-        enable_fe_dropout=True,
-        only_shared_feature=True,
-    )
-
-    shared_head_loss, shared_head_acc = _create_shared_head(
-        weight_blocks.shared_features,
-        dataset.transformer_real_classes,
-        dataset.real_class_min,
-        dataset.real_class_max,
-    )
+    shared_head_loss, shared_head_acc = model.shared_head_outputs.values()
     assert shared_head_loss is not None
-    _, optimizer = make_optimizer(optim_config, global_step)
-    state.loss = shared_head_loss
+    _, optimizer = _make_optimizer(optim_config, global_step)
+    model_state.loss = shared_head_loss
 
     return common.TrainState(
-        train_op=make_train_op(optimizer, state.loss),
+        train_op=_make_train_op(optimizer, model_state.loss),
         step_initializer=dataset.randomize_fn,
         large_summaries=[],
         small_summaries=[
@@ -525,20 +492,27 @@ def train(
     layerwise_model_config: common_ht.LayerwiseModelConfig,
 ):
     """Main function training the model."""
-    state = train_lib.ModelState()
-    logging.info("Creating the dataset")
+    model_state = train_lib.ModelState()
+    logging.info("Creating the dataset...")
+
+    numpy_arr = train_lib.make_numpy_array(
+        data_config=dataset_config,
+        batch_size=layerwise_model_config.num_transformer_samples,
+    )
     dataset = train_lib.make_dataset(
+        numpy_arr=numpy_arr,
         model_config=layerwise_model_config,
         data_config=dataset_config,
     )
     test_dataset = train_lib.make_dataset(
+        numpy_arr=numpy_arr,
         model_config=layerwise_model_config,
         data_config=test_dataset_config,
     )
     args = {
         "dataset": dataset,
         "test_dataset": test_dataset,
-        "state": state,
+        "model_state": model_state,
         "optim_config": optimizer_config,
     }
 
@@ -556,7 +530,9 @@ def train(
     logging.info("Training")
     train_state = create_model(**args)
 
-    init_op = restore_shared_features()
+    init_op = restore_shared_features(
+        model=train_state.model,
+    )
     restored = common.init_training(train_state)
     if not restored and init_op is not None:
         sess.run(init_op)
@@ -564,8 +540,9 @@ def train(
 
 
 def main(argv):
+    # The command-line parameters have been parsed by absl.
     if len(argv) > 1:
-        raise app.UsageError("Too many command-line arguments.")
+        del argv
 
     logging.info(f"FLAGS: {FLAGS.flag_values_dict()}")
 

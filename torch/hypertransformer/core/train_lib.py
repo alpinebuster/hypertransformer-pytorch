@@ -16,12 +16,6 @@ from hypertransformer.core import common_ht
 from hypertransformer.core.common_ht import LayerwiseModelConfig, DatasetConfig
 from hypertransformer.core import datasets
 
-# NOTE: `NUMPY_BATCH_SIZE` is the batch size used when pulling data 
-# from the TF Dataset to build the NumPy cache. 
-# It only affects preprocessing speed and memory usage, 
-# and does not affect the training batch or task structure.
-NUMPY_BATCH_SIZE = 128
-
 
 @dataclasses.dataclass
 class ModelState:
@@ -93,8 +87,7 @@ def _load_cache(data_config: DatasetConfig) -> Optional[dict[int, np.ndarray]]:
     )
     return None
 
-
-def _make_numpy_array(
+def make_numpy_array(
     data_config: DatasetConfig,
     batch_size: int,
 ) -> dict[int, np.ndarray]:
@@ -160,14 +153,17 @@ def _resize(imgs: torch.Tensor, image_size: int) -> torch.Tensor:
 
 
 def _make_dataset_helper_unbalanced(
+    numpy_arr: dict[int, np.ndarray],
     batch_size: int,
     image_size: int,
     num_labels: int,
     data_config: DatasetConfig,
     always_same_labels=False,
-) -> Tuple[datasets.SupervisedSample, Callable[[], None]]:
-    """Helper function for creating a dataset."""
-    numpy_arr = _make_numpy_array(data_config, batch_size)
+) -> datasets.SupervisedSample:
+    """Helper function for creating a dataset.
+
+       `numpy_arr = make_numpy_array(data_config, batch_size)`
+    """
     config = _make_augmentation_config(data_config=data_config, num_labels=num_labels)
 
     gen = datasets.TaskGenerator(
@@ -176,7 +172,7 @@ def _make_dataset_helper_unbalanced(
         use_label_subset=data_config.use_label_subset,
         always_same_labels=always_same_labels,
     )
-    randomize_fn = lambda: config.randomize()
+    config.randomize()
     images, labels, classes = gen.get_batch(
         batch_size=batch_size,
         config=config,
@@ -188,19 +184,22 @@ def _make_dataset_helper_unbalanced(
     images = images / 128.0 - 1.0
 
     sample: datasets.SupervisedSample = (images, labels, classes)
-    return sample, randomize_fn
+    return sample
 
 
 def _make_dataset_helper_balanced(
+    numpy_arr: dict[int, np.ndarray],
     batch_sizes: list[int],
     num_unlabeled_per_class: list[int],
     image_size,
     num_labels: int,
     data_config: DatasetConfig,
     always_same_labels=False,
-) -> Tuple[list[datasets.SupervisedSample], Callable[[], None]]:
-    """Helper function for creating a balanced dataset."""
-    numpy_arr = _make_numpy_array(data_config, NUMPY_BATCH_SIZE)
+) -> list[datasets.SupervisedSample]:
+    """Helper function for creating a balanced dataset.
+
+       `numpy_arr = make_numpy_array(data_config, batch_sizes[0])`
+    """
     config = _make_augmentation_config(data_config=data_config, num_labels=num_labels)
 
     gen = datasets.TaskGenerator(
@@ -209,7 +208,7 @@ def _make_dataset_helper_balanced(
         use_label_subset=data_config.use_label_subset,
         always_same_labels=always_same_labels,
     )
-    randomize_fn = lambda: config.randomize()
+    config.randomize()
     images_labels = gen.get_batches(
         batch_sizes=batch_sizes,
         config=config,
@@ -223,7 +222,7 @@ def _make_dataset_helper_balanced(
         images = images / 128.0 - 1.0
         output.append((images, labels, classes))
 
-    return output, randomize_fn
+    return output
 
 
 def _get_class_bounds(data_config: DatasetConfig):
@@ -232,7 +231,8 @@ def _get_class_bounds(data_config: DatasetConfig):
     return min(data_config.use_label_subset), max(data_config.use_label_subset)
 
 
-def make_dataset_unbalanced(
+def _make_dataset_unbalanced(
+    numpy_arr: dict[int, np.ndarray],
     model_config: LayerwiseModelConfig,
     data_config: DatasetConfig,
     shuffle_labels=True,
@@ -252,7 +252,8 @@ def make_dataset_unbalanced(
     batch_size += model_config.num_cnn_samples
 
     assert model_config.image_size
-    sample, randomize_fn = _make_dataset_helper_unbalanced(
+    sample = _make_dataset_helper_unbalanced(
+        numpy_arr=numpy_arr,
         batch_size=batch_size,
         image_size=model_config.image_size,
         num_labels=model_config.num_labels,
@@ -278,13 +279,13 @@ def make_dataset_unbalanced(
         cnn_images=cnn_images,
         cnn_labels=labels[transformer_samples:],
         cnn_real_classes=classes[transformer_samples:],
-        randomize_fn=randomize_fn,
         real_class_min=real_class_min,
         real_class_max=real_class_max,
     )
 
 
-def make_dataset_balanced(
+def _make_dataset_balanced(
+    numpy_arr: dict[int, np.ndarray],
     model_config: LayerwiseModelConfig,
     data_config: DatasetConfig,
     shuffle_labels: bool = True,
@@ -304,7 +305,8 @@ def make_dataset_balanced(
     # Removing labels only from the Transformer batch.
     num_unlabeled_per_class = [data_config.num_unlabeled_per_class, 0]
 
-    batches, randomize_fn = _make_dataset_helper_balanced(
+    batches = _make_dataset_helper_balanced(
+        numpy_arr=numpy_arr,
         batch_sizes=batch_sizes,
         num_unlabeled_per_class=num_unlabeled_per_class,
         image_size=model_config.image_size,
@@ -331,18 +333,33 @@ def make_dataset_balanced(
         cnn_images=cnn_images,
         cnn_labels=cnn_labels,
         cnn_real_classes=cnn_classes,
-        randomize_fn = randomize_fn,
         real_class_min=real_class_min,
         real_class_max=real_class_max,
     )
 
 
 def make_dataset(
+    numpy_arr: dict[int, np.ndarray],
     model_config: LayerwiseModelConfig,
     data_config: DatasetConfig,
     **kwargs,
 ):
-    """Makes dataset given dataset and model configuration."""
+    """Makes dataset given dataset and model configuration.
+    
+    1) Balanced:
+       The number of samples for each category in each batch is the same (or as much as possible the same), and within the batch, they are clearly organized by "category".
+
+       e.g.
+          Transformer: [0,1,2,3,4, ...]
+          CNN: [0,1,2,3,4, ...]
+
+    2) Unbalanced:
+       In a batch, only the total number of samples is guaranteed, and the occurrence frequency of each category is not guaranteed to be consistent.
+
+       e.g.
+          Transformer: [0, 0, 0, 1, 1, 3]
+          CNN: [2, 2, 2, 4, 4]
+    """
     augment = functools.partial(
         datasets.augment_images,
         augment_individually=data_config.augment_individually,
@@ -350,11 +367,16 @@ def make_dataset(
 
     if data_config.balanced_batches:
         # The two batches are "generated separately".
-        dataset_maker = make_dataset_balanced
+        dataset_maker = _make_dataset_balanced
     else:
-        dataset_maker = make_dataset_unbalanced
+        dataset_maker = _make_dataset_unbalanced
 
-    output = dataset_maker(model_config=model_config, data_config=data_config, **kwargs)
+    output = dataset_maker(
+        numpy_arr=numpy_arr,
+        model_config=model_config,
+        data_config=data_config,
+        **kwargs,
+    )
     if data_config.apply_image_augmentations:
         assert model_config.image_size is not None
         image_size = model_config.image_size

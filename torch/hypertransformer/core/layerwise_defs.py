@@ -2,15 +2,20 @@
 
 import functools
 
-from hypertransformer.core.common_ht import LayerwiseModelConfig
 from hypertransformer.core import layerwise
+from hypertransformer.core import common_ht
 
 ConvLayer = layerwise.ConvLayer
 LogitsLayer = layerwise.LogitsLayer
 FlattenLogitsLayer = layerwise.FlattenLogitsLayer
 
 
-def maxpool_model(model_config: LayerwiseModelConfig, num_layers=4, last_maxpool=2):
+def maxpool_model(
+    model_config: common_ht.LayerwiseModelConfig,
+    dataset: common_ht.DatasetSamples,
+    num_layers=4,
+    last_maxpool=2,
+):
     """Creates a larger 4-layer model (similar to the one in MAML paper)."""
     conv_args = {"model_config": model_config, "maxpool_size": 2, "padding": "same"}
     layers = [
@@ -23,10 +28,14 @@ def maxpool_model(model_config: LayerwiseModelConfig, num_layers=4, last_maxpool
         ConvLayer(name=f"layer_{num_layers}", **conv_args),
         FlattenLogitsLayer(name=f"layer_{num_layers + 1}", model_config=model_config),
     ]
-    return layerwise.LayerwiseModel(layers=layers, model_config=model_config)
+    return layerwise.LayerwiseModel(layers=layers, model_config=model_config, dataset=dataset)
 
 
-def avgpool_model(model_config: LayerwiseModelConfig, num_layers=1):
+def avgpool_model(
+    model_config: common_ht.LayerwiseModelConfig,
+    dataset: common_ht.DatasetSamples,
+    num_layers=1,
+):
     """Creates a basic 'layerwise' model."""
     layers = [
         ConvLayer(
@@ -41,7 +50,7 @@ def avgpool_model(model_config: LayerwiseModelConfig, num_layers=1):
         ConvLayer(name=f"layer_{num_layers}", model_config=model_config),
         LogitsLayer(name=f"layer_{num_layers + 1}", model_config=model_config),
     ]
-    return layerwise.LayerwiseModel(layers=layers, model_config=model_config)
+    return layerwise.LayerwiseModel(layers=layers, model_config=model_config, dataset=dataset)
 
 
 def register():

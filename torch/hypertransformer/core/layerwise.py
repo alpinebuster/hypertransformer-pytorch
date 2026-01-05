@@ -7,6 +7,7 @@ import math
 from typing import cast, Callable, Optional, Union, Sequence, \
     Tuple
 
+from absl import flags
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -16,6 +17,8 @@ from hypertransformer.core.common_ht import LayerwiseModelConfig
 from hypertransformer.core import feature_extractors
 from hypertransformer.core import transformer
 from hypertransformer.core import util
+
+FLAGS = flags.FLAGS
 
 GAMMA_SCALE = 1.0
 BETA_SCALE = 1.0
@@ -33,9 +36,13 @@ class GeneratedWeights:
     shared_features: Optional[torch.Tensor] = None
 
 
-def build_model(name: str, model_config: common_ht.LayerwiseModelConfig) -> "LayerwiseModel":
+def build_model(
+    name: str,
+    model_config: common_ht.LayerwiseModelConfig,
+    dataset: common_ht.DatasetSamples,
+) -> "LayerwiseModel":
     model_fn = models[name]
-    return model_fn(model_config=model_config)
+    return model_fn(model_config=model_config, dataset=dataset)
 
 
 def get_remove_probability(max_probability: float) -> torch.Tensor:
@@ -467,7 +474,6 @@ class BaseCNNLayer(nn.Module):
         selected_weights: dict[str, Optional[torch.Tensor]] = {},
         evaluation: bool = False,
         separate_bn_variables: bool = False,
-        training: bool = True,
     ) -> torch.Tensor:
         raise NotImplementedError
 
@@ -789,7 +795,6 @@ class ConvLayer(BaseCNNLayer):
         selected_weights: dict[str, Optional[torch.Tensor]] = {},
         evaluation: bool = False,
         separate_bn_variables: bool = False,
-        training: bool = True,
     ) -> torch.Tensor:
         # Layers should be created in `__call__` to properly build weights from
         # Transformer outputs for both training and evaluation.
@@ -998,7 +1003,6 @@ class LogitsLayer(BaseCNNLayer):
         selected_weights: dict[str, Optional[torch.Tensor]] = {},
         evaluation: bool = False,
         separate_bn_variables: bool = False,
-        training: bool = True,
     ) -> torch.Tensor:
         # Global Average Pooling
         # [batch, channels, height, width] → [batch, channels, 1, 1]
@@ -1088,7 +1092,6 @@ class FlattenLogitsLayer(LogitsLayer):
         selected_weights: dict[str, Optional[torch.Tensor]] = {},
         evaluation: bool = False,
         separate_bn_variables: bool = False,
-        training: bool = True,
     ) -> torch.Tensor:
         # [batch, C, H, W] → [batch, C*H*W]
         inputs = inputs.flatten(start_dim=1)
@@ -1098,7 +1101,7 @@ class FlattenLogitsLayer(LogitsLayer):
 
 
 # ------------------------------------------------------------
-#   Layerwise model class
+#   Layerwise model
 # ------------------------------------------------------------
 
 
@@ -1112,6 +1115,7 @@ class LayerwiseModel(nn.Module):
         self,
         layers: "Sequence[Union[ConvLayer, BaseCNNLayer]]",
         model_config: LayerwiseModelConfig,
+        dataset: common_ht.DatasetSamples,
     ):
         super().__init__()
 
@@ -1128,6 +1132,21 @@ class LayerwiseModel(nn.Module):
         self.shared_fe_dropout = model_config.shared_fe_dropout
         self.fe_dropout = model_config.fe_dropout
         self.model_config = model_config
+        self.dataset = dataset
+
+        if (
+            model_config.shared_features_dim is not None and
+            dataset.real_class_min is not None and
+            dataset.real_class_max is not None
+        ):
+            self.shared_head = feature_extractors.SharedHead(
+                shared_features_dim=model_config.shared_features_dim,
+                real_class_min=dataset.real_class_min,
+                real_class_max=dataset.real_class_max,
+                label_smoothing=model_config.label_smoothing,
+            )
+        else:
+            self.shared_head = None
 
     def _train(
         self,
@@ -1222,10 +1241,8 @@ class LayerwiseModel(nn.Module):
             inputs = layer.apply(
                 inputs,
                 weight_blocks=weight_blocks,
-                training=True,
                 separate_bn_variables=self.separate_bn_variables,
             )
-            # pdb.set_trace()
 
             # cnn_builder_heads
             if layer.head is not None:
@@ -1238,6 +1255,18 @@ class LayerwiseModel(nn.Module):
                 )
                 all_head_blocks[layer.name] = head_blocks
 
+        self.shared_head_outputs = {}
+        if self.shared_head is not None and self.dataset.transformer_real_classes is not None:
+            shared_head_loss, shared_head_acc = self.shared_head(
+                shared_features,
+                self.dataset.transformer_real_classes,
+            )
+            self.shared_head_outputs["loss"] = shared_head_loss
+            self.shared_head_outputs["accuracy"] = shared_head_acc
+        else:
+            self.shared_head_outputs["loss"] = None
+            self.shared_head_outputs["accuracy"] = None
+
         return GeneratedWeights(
             weight_blocks=all_weight_blocks,
             head_weight_blocks=all_head_blocks,
@@ -1248,7 +1277,6 @@ class LayerwiseModel(nn.Module):
         self,
         inputs: torch.Tensor,
         weight_blocks: Optional["GeneratedWeights"] = None,
-        training: bool = True,
     ) -> torch.Tensor:
         """Passes input tensors (Query Set) through a built CNN model."""
         if weight_blocks is None:
@@ -1261,7 +1289,6 @@ class LayerwiseModel(nn.Module):
             inputs = layer.apply(
                 inputs,
                 weight_blocks=layer_blocks,
-                training=training,
                 evaluation=True,
                 separate_bn_variables=self.separate_bn_variables,
             )
@@ -1272,7 +1299,6 @@ class LayerwiseModel(nn.Module):
                 head = layer.head.apply(
                     inputs,
                     weight_blocks=weight_blocks.head_weight_blocks[layer.name],
-                    training=training,
                     evaluation=True,
                     separate_bn_variables=self.separate_bn_variables,
                 )
@@ -1282,14 +1308,26 @@ class LayerwiseModel(nn.Module):
 
     def forward(
         self,
-        inputs: torch.Tensor,
-        labels: torch.Tensor | None = None,
-        mask: torch.Tensor | None = None,
+        transformer_images: torch.Tensor,
+        transformer_labels: torch.Tensor,
+        cnn_images: torch.Tensor,
+        mask: Optional[torch.Tensor] = None,
         mask_random_samples: bool = False,
         enable_fe_dropout: bool = False,
         only_shared_feature: bool = False,
-        return_generated_weights: bool = False,
-        weight_blocks: Optional["GeneratedWeights"] = None,
-        training: bool = True,
-    ) -> torch.Tensor:
-        return inputs
+        training: bool = True, # Train or Test
+    ) -> Optional[torch.Tensor]:
+        weight_blocks: Optional["GeneratedWeights"] = self._train(
+            transformer_images,
+            transformer_labels,
+            mask,
+            mask_random_samples=mask_random_samples
+                if mask_random_samples
+                else training or only_shared_feature,
+            enable_fe_dropout=enable_fe_dropout
+                if enable_fe_dropout
+                else training or only_shared_feature,
+            only_shared_feature=only_shared_feature,
+        )
+        if not only_shared_feature:
+            return self._evaluate(cnn_images, weight_blocks)

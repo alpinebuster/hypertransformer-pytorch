@@ -19,6 +19,7 @@
         "onnx",
         "randn",
         "randperm",
-        "semisupervised"
+        "semisupervised",
+        "wamup"
     ]
 }

@@ -687,6 +687,7 @@ class TaskGenerator:
         types += [tf.int32] * self.num_labels
         types += [tf.int32] * self.num_labels
         types = types * len(batch_sizes)
+        # NOTE: stateful=True -> Each time `sess.run` is executed, the `sup_sample` is re-executed
         output = tf.py_func(sup_sample, [], types, stateful=True)
 
         images_labels = []

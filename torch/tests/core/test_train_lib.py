@@ -13,7 +13,7 @@ from hypertransformer.core import datasets
     [
         (8, 8, 8, 4, 1, 16), # num_transformer_samples < num_samples_per_label and num_cnn_samples < num_samples_per_label
         (2, 6, 10, 5, 3, 32),
-        (96, 16, 128, 6, 8, 64),
+        (96, 16, 128, 6, 3, 64),
     ],
 )
 def test_make_dataset_helper(
@@ -54,7 +54,12 @@ def test_make_dataset_helper(
         dataset_info=dataset_info,
     )
 
+    numpy_arr = train_lib.make_numpy_array(
+        data_config,
+        batch_size=model_config.num_transformer_samples,
+    )
     samples = train_lib.make_dataset(
+        numpy_arr=numpy_arr,
         model_config=model_config,
         data_config=data_config,
         shuffle_labels=True,
@@ -70,4 +75,3 @@ def test_make_dataset_helper(
     assert outputs["train_labels"].shape == (num_transformer_samples,)
     assert outputs["cnn_images"].shape == (num_cnn_samples, channels, image_size, image_size)
     assert outputs["cnn_labels"].shape == (num_cnn_samples,)
-

@@ -4,7 +4,7 @@ import dataclasses
 import enum
 import functools
 
-from typing import TYPE_CHECKING, Optional, Callable, Any
+from typing import TYPE_CHECKING, Optional, Callable
 
 import torch
 import torch.nn.functional as F
@@ -144,6 +144,7 @@ class LayerwiseModelConfig(ModelConfig):
     shared_feature_extractor: str = ""
     shared_features_dim: int = 32
     shared_feature_extractor_padding: str = "valid"
+    label_smoothing: float = 0.
     number_of_trained_cnn_layers: int = 0
     # By default, the logits feature extractor is identical to the convolutional
     # layer feature extractor (typically, based on one or two convolutions applied
@@ -188,7 +189,6 @@ class DatasetSamples:
     cnn_images: torch.Tensor # Query set
     cnn_labels: torch.Tensor
     cnn_real_classes: Optional[torch.Tensor]
-    randomize_fn: Callable[[], None]
     transformer_masks: Optional[torch.Tensor] = None
     real_class_min: Optional[int] = None
     real_class_max: Optional[int] = None

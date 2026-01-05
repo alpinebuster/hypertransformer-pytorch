@@ -1,30 +1,101 @@
 """Tests for `layerwise.py`."""
 
+import pytest
 import torch
+import numpy as np
 
 from hypertransformer.core import common_ht
+from hypertransformer.core import datasets
 from hypertransformer.core import layerwise
 from hypertransformer.core import layerwise_defs # pylint:disable=unused-import
+from hypertransformer.core import train_lib
 
 
-def make_layerwise_model_config():
-    """Makes 'layerwise' model config."""
-    return common_ht.LayerwiseModelConfig()
+@pytest.fixture(params=[
+    {
+        "num_transformer_samples": 8,
+        "num_cnn_samples": 8,
+        "num_samples_per_label": 8,
+        "num_labels": 4,
+        "channels": 1,
+        "image_size": 32,
+    },
+    {
+        "num_transformer_samples": 2,
+        "num_cnn_samples": 6,
+        "num_samples_per_label": 10,
+        "num_labels": 5,
+        "channels": 3,
+        "image_size": 64,
+    },
+])
+def layerwise_params(request):
+    p = request.param
+    num_transformer_samples = p["num_transformer_samples"]
+    num_cnn_samples = p["num_cnn_samples"]
+    num_samples_per_label = p["num_samples_per_label"]
+    num_labels = p["num_labels"]
+    channels = p["channels"]
+    image_size = p["image_size"]
 
-def test_number_of_trained_cnn_layers_param_should_give_trained_weights():
-    """Tests the layerwise model with both generated and trained weights."""
     torch.manual_seed(0)
 
-    model_config = make_layerwise_model_config()
-    model_config.number_of_trained_cnn_layers = 1
-    model = layerwise.build_model(
-        model_config.cnn_model_name,
-        model_config=model_config,
+    batch_size = num_samples_per_label * num_labels
+    assert batch_size % num_labels == 0
+    repetitions = batch_size // num_labels
+
+    # (batch_size, channels, image_size, image_size)
+    images = np.zeros(
+        (batch_size, channels, image_size, image_size),
+        dtype=np.float32,
+    )
+    # [0,1,..,num_labels, ..., 0,1,..,num_labels]
+    labels = np.array(list(range(num_labels))*repetitions, dtype=np.int32)
+    ds = datasets.HTDataset(images, labels)
+
+    model_config = common_ht.LayerwiseModelConfig(
+        num_transformer_samples=num_transformer_samples,
+        num_cnn_samples=num_cnn_samples,
+        image_size=image_size,
+    )
+    dataset_info = common_ht.DatasetInfo(
+        num_labels=num_labels,
+        num_samples_per_label=num_samples_per_label,
+        transpose_images=False,
+    )
+    data_config = common_ht.DatasetConfig(
+        dataset_name="dataset",
+        ds=ds,
+        dataset_info=dataset_info,
     )
 
-    images = torch.randn(100, 1, 64, 64)
-    labels = torch.randint(0, model_config.num_labels, (100,))
-    weights = model._train(images, labels)
+    numpy_arr = train_lib.make_numpy_array(
+        data_config,
+        batch_size=model_config.num_transformer_samples,
+    )
+    dataset = train_lib.make_dataset(
+        numpy_arr=numpy_arr,
+        model_config=model_config,
+        data_config=data_config,
+        shuffle_labels=True,
+    )
+
+    return (model_config, dataset)
+
+def test_number_of_trained_cnn_layers_param_should_give_trained_weights(layerwise_params):
+    """Tests the layerwise model with both generated and trained weights."""
+    (
+        model_config,
+        dataset,
+    ) = layerwise_params
+    model_config.number_of_trained_cnn_layers = 1
+
+    model = layerwise.build_model(
+        name=model_config.cnn_model_name,
+        model_config=model_config,
+        dataset=dataset,
+    )
+    weights = model._train(dataset.transformer_images, dataset.transformer_labels)
 
     # The first CNN layer is directly trained → no weights are generated
     assert weights.weight_blocks[0] is None
@@ -32,7 +103,7 @@ def test_number_of_trained_cnn_layers_param_should_give_trained_weights():
     for weight_block in weights.weight_blocks[1:]:
         assert weight_block is not None
 
-    model._evaluate(images, weight_blocks=weights)
+    model._evaluate(dataset.cnn_images, weight_blocks=weights)
 
     # The first layer: real trainable parameters
     first_kernel = model.layers[0].kernel
@@ -45,21 +116,21 @@ def test_number_of_trained_cnn_layers_param_should_give_trained_weights():
     # torch.nn.Parameter ⊂ torch.Tensor
     assert not isinstance(second_kernel, torch.nn.Parameter)
 
-def test_negative_number_of_trained_cnn_layers_param_trains_last_layers():
+def test_negative_number_of_trained_cnn_layers_param_trains_last_layers(layerwise_params):
     """Tests the layerwise model with both generated and trained weights."""
-    torch.manual_seed(0)
-
-    model_config = make_layerwise_model_config()
+    (
+        model_config,
+        dataset,
+    ) = layerwise_params
     model_config.number_of_trained_cnn_layers = -1
+
     model = layerwise.build_model(
         model_config.cnn_model_name,
         model_config=model_config,
+        dataset=dataset,
     )
 
-    images = torch.randn(100, 1, 64, 64)
-    labels = torch.randint(0, model_config.num_labels, (100,))
-
-    weights = model._train(images, labels)
+    weights = model._train(dataset.transformer_images, dataset.transformer_labels)
 
     # The second-to-last layer is directly trained
     assert weights.weight_blocks[-2] is None
@@ -67,7 +138,7 @@ def test_negative_number_of_trained_cnn_layers_param_trains_last_layers():
     for weight_block in weights.weight_blocks[:-2]:
         assert weight_block is not None
 
-    model._evaluate(images, weight_blocks=weights)
+    model._evaluate(dataset.cnn_images, weight_blocks=weights)
 
     # The penultimate layer: real trainable parameters
     last_trained_kernel = model.layers[-2].kernel
@@ -79,12 +150,13 @@ def test_negative_number_of_trained_cnn_layers_param_trains_last_layers():
     assert isinstance(first_kernel, torch.Tensor)
     assert not isinstance(first_kernel, torch.nn.Parameter)
 
-def test_layer_with_activation_after_bn_different_activation_before_bn():
+def test_layer_with_activation_after_bn_different_activation_before_bn(layerwise_params):
     """Tests the option to use activation before or after batchnorm."""
-    torch.manual_seed(0)
+    (
+        model_config,
+        _,
+    ) = layerwise_params
 
-    model_config = make_layerwise_model_config()
-    
     def act_fn(x):
         return torch.ones_like(x)
 

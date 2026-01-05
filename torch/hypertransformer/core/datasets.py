@@ -653,7 +653,7 @@ class TaskGenerator:
             "unlabeled" samples per class for each batch.
 
         Returns:
-           A list of (images,labels) pairs produced for each output batch.
+           A list of (images, labels) pairs produced for each output batch.
            [
               (images_1, labels_1, classes_1),
               (images_2, labels_2, classes_2),
@@ -738,7 +738,17 @@ class TaskGenerator:
         # Augmentation
         images = config.process(images)
 
-        # Shuffle -> Equal to: `tf.range + tf.random.shuffle + tf.gather`
+        # NOTE:
+        # Here, a full-batch random shuffle is performed, followed by the subsequent steps:
+        # 
+        #   ```python
+        #   transformer_images = images[:transformer_samples]
+        #   cnn_images = images[transformer_samples:]
+        #   ```
+        # 
+        # When splitting by "location",
+        # the transformer might be dominated by just a few classes,
+        # while the CNN might be lacking certain classes.
         perm = torch.randperm(images.size(0), device=images.device)
         images = images[perm]
         labels = labels[perm]

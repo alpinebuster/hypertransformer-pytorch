@@ -11,8 +11,6 @@ from typing_extensions import Annotated
 from absl import flags, logging
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 
 from hypertransformer.core import util
 
@@ -60,12 +58,19 @@ class TrainState:
         Callable[[], None],
         tuple[Callable[[], None], ...],
     ]
+    scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None
     global_step: int = 0
-    summary_writer: Optional[util.MultiFileWriter] = None
-    per_step_fn: Optional[Callable[[torch.Tensor, Any, Any], None]] = None
+    per_step_fn: Optional[Callable[[int, "TrainState", dict[str, Any]], None]] = None
+    tensors_to_eval: Optional[Any] = None
 
     checkpoint_dir: str = FLAGS.train_log_dir
     checkpoint_suffix: str = "model"
+
+    summary_writer: Optional[util.MultiFileWriter] = None
+    # Optional: functions that produce summaries given (state, results)
+    # Each summary function returns a dict[name -> value] for scalars and/or images
+    small_summaries: list[Callable[["TrainState", dict[str, Any]], dict[str, Any]]] = field(default_factory=list)
+    large_summaries: list[Callable[["TrainState", dict[str, Any]], dict[str, Any]]] = field(default_factory=list)
 
     def save(self):
         os.makedirs(self.checkpoint_dir, exist_ok=True)
@@ -90,7 +95,7 @@ class TrainState:
         data = torch.load(ckpt, map_location="cpu")
         self.model.load_state_dict(data["model"])
         self.optimizer.load_state_dict(data["optimizer"])
-        self.global_step = data["step"]
+        self.global_step = int(data.get("step", 0))
         return True
 
 
@@ -121,27 +126,44 @@ def _is_not_empty(tensor):
     )
 
 
-def train(train_config: TrainConfig, state: TrainState, run_options=None) -> None:
-    """Train loop."""
-    step = sess.run(state.global_step)
-    first_step = step
+def train(
+    train_config: TrainConfig,
+    state: TrainState,
+    batch_provider: Callable[[], dict[str, Any]],
+) -> None:
+    """Train loop.
+
+    Args:
+       train_config: Contains train_steps, steps_between_saves, small/large summary freqs
+       state: TrainState (holds model/optimizer/step/etc.)
+       batch_provider: Callable that returns a dict containing the inputs needed.
+          Example return value for layerwise model:
+            {
+              "support_images": Tensor(Bs, C, H, W),
+              "support_labels": Tensor(Bs,),
+              "query_images": Tensor(Bq, C, H, W),
+              "query_labels": Tensor(Bq,),
+                ...
+            }
+    """
+    device = next(state.model.parameters()).device
+    start_step = state.global_step
     starting_time = time.time()
 
     def _save():
-        state.saver.save(
-            sess,
-            os.path.join(FLAGS.train_log_dir, state.checkpoint_suffix),
-            write_meta_graph=False,
-            global_step=step,
-        )
+        logging.info(f"Saving checkpoint at step {state.global_step}")
+        state.save()
 
-    while step <= train_config.train_steps:
+    while state.global_step <= train_config.train_steps:
         if state.step_initializer is not None:
             if callable(state.step_initializer):
                 state.step_initializer()
             else:
                 for fn in state.step_initializer:
                     fn()
+
+        batch = batch_provider()
+
 
         to_run = {
             "step": state.global_step,
@@ -150,32 +172,32 @@ def train(train_config: TrainConfig, state: TrainState, run_options=None) -> Non
         }
         if state.tensors_to_eval is not None:
             to_run["tensors"] = state.tensors_to_eval
-        if (step - first_step) % 100 == 1:
+        if (state.global_step - start_step) % 100 == 1:
             logging.info(
                 "Step: %d, Time per step: %f",
-                step,
-                (time.time() - starting_time) / (step - first_step),
+                state.global_step,
+                (time.time() - starting_time) / (state.global_step - start_step),
             )
 
         if (
             train_config.steps_between_saves > 0
-            and step % train_config.steps_between_saves == 0
+            and state.global_step % train_config.steps_between_saves == 0
         ):
             _save()
 
-        if step % train_config.small_summaries_every == 0 and _is_not_empty(
+        if state.global_step % train_config.small_summaries_every == 0 and _is_not_empty(
             state.small_summaries
         ):
             to_run["small"] = state.small_summaries
 
-        if step % train_config.large_summaries_every == 0 and _is_not_empty(
+        if state.global_step % train_config.large_summaries_every == 0 and _is_not_empty(
             state.large_summaries
         ):
             to_run["large"] = state.large_summaries
 
         results = sess.run(to_run, options=run_options)
         if state.per_step_fn:
-            state.per_step_fn(step, sess, results)
+            state.per_step_fn(state.global_step, sess, results)
 
         step = results["step"]
 
@@ -193,13 +215,11 @@ def train(train_config: TrainConfig, state: TrainState, run_options=None) -> Non
 
 
 def init_training(state: TrainState) -> bool:
-    """Initializes the training loop.
-
-    Args:
-      state: Training state.
+    """Initializes the training loop by creating writer if needed
+    and try restoring latest checkpoint.
 
     Returns:
-      True if checkpoint was found and false otherwise.
+       True if checkpoint was found and False otherwise.
     """
     if state.summary_writer is None:
         state.summary_writer = util.MultiFileWriter(state.checkpoint_dir)
