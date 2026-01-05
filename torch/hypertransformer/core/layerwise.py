@@ -7,7 +7,6 @@ import math
 from typing import cast, Callable, Optional, Union, Sequence, \
     Tuple
 
-from absl import flags
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -17,8 +16,6 @@ from hypertransformer.core.common_ht import LayerwiseModelConfig
 from hypertransformer.core import feature_extractors
 from hypertransformer.core import transformer
 from hypertransformer.core import util
-
-FLAGS = flags.FLAGS
 
 GAMMA_SCALE = 1.0
 BETA_SCALE = 1.0
@@ -838,6 +835,23 @@ class ConvLayer(BaseCNNLayer):
         if self.maxpool_size is not None and self.maxpool is not None:
             x = self.maxpool(x)
 
+        """
+        # Batch normalization should always in the training mode.
+        #
+        # ------------------------------------------------------------------
+        # In a standard CNN:
+        #   - During training, training=True  -> use batch mean/variance
+        #   - During testing,  training=False -> use global mean/variance (moving averages) from training
+        #   Assumes train/test data come from the same distribution.
+        #
+        # In this hypertransformer + few-shot setting:
+        #   - Each forward pass is a new task (e.g., "cat vs dog", then "plane vs ship")
+        #   - CNN weights are generated per task, not fixed
+        #   - There is no stable global feature distribution
+        #
+        # Therefore, BatchNorm must always use batch statistics (training=True)
+        # to normalize features based on the current task's data.
+        """
         gamma = None
         beta = None
         bn_layer = None

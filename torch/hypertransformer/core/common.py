@@ -4,15 +4,22 @@ import dataclasses
 import os
 import time
 
-from typing import Any, Callable, Optional, Union, \
+from typing import TYPE_CHECKING, Any, Callable, Optional, \
     TypedDict
 from typing_extensions import Annotated
 
 from absl import flags, logging
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 from hypertransformer.core import util
+from hypertransformer import common_flags
+
+if TYPE_CHECKING:
+    from hypertransformer.core.layerwise import LayerwiseModel
+    from hypertransformer.core import train_lib
+    from hypertransformer.core import common_ht
 
 FLAGS = flags.FLAGS
 
@@ -52,13 +59,10 @@ class TrainConfig:
 @dataclasses.dataclass
 class TrainState:
     """Model state."""
-    model: torch.nn.Module
+    model: "LayerwiseModel"
+    model_state: "train_lib.ModelState"
     optimizer: torch.optim.Optimizer
-    step_initializer: Union[
-        Callable[[], None],
-        tuple[Callable[[], None], ...],
-    ]
-    scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None
+    scheduler: Optional[torch.optim.lr_scheduler.LRScheduler]
     global_step: int = 0
     per_step_fn: Optional[Callable[[int, "TrainState", dict[str, Any]], None]] = None
     tensors_to_eval: Optional[Any] = None
@@ -125,11 +129,84 @@ def _is_not_empty(tensor):
         tensor is not None and len(tensor) > 0
     )
 
+def _make_warmup_loss(
+    loss_heads: list[torch.Tensor],
+    loss_prediction: torch.Tensor,
+    global_step: int,
+) -> tuple[torch.Tensor, list[torch.Tensor]]:
+    """Uses head losses to build aggregate loss cycling through them."""
+    # The warmup period is broken into a set of "head activation periods".
+    # Each period, one head weight is linearly growing, while the previous
+    # head weight goes down.
+    # Basically, each moment of time only two heads are active and the active
+    # heads slide towards the final layer.
+    num_heads = len(loss_heads)
+    steps_per_stage = FLAGS.warmup_steps / num_heads
+    loss = 0
+    weights = []
+
+    # The following code ends up returning just the true model head loss
+    # after `global step` reaches `warmup_steps`.
+
+    for stage, head_loss in enumerate(loss_heads):
+        target_steps = stage * steps_per_stage
+        norm_step_dist = torch.abs(global_step - target_steps) / steps_per_stage
+        # This weight starts at 0 and peaks reaching 1 at `target_steps`. It then
+        # decays linearly to 0 and stays 0.
+        # weight = max(0, 1 - norm_step_dist)
+        weight = torch.clamp(1.0 - norm_step_dist, min=0.0)
+        weights.append(weight)
+        loss += weight * head_loss
+
+    target_steps = num_heads * steps_per_stage
+    norm_step_dist = 1.0 + (global_step - target_steps) / steps_per_stage
+    norm_step_dist = torch.relu(norm_step_dist)
+    # Weight for the actual objective linearly grows after the final layer head
+    # peaks and then stays equal to 1.
+    # weight = min(1, norm_step_dist)
+    weight = torch.clamp(norm_step_dist, max=1.0)
+    weights.append(weight)
+    loss += weight * loss_prediction
+
+    return loss, weights
+
+def _make_loss(
+    labels: torch.Tensor, # (B,)
+    predictions: torch.Tensor, # (B, num_classes)
+    heads: list[torch.Tensor], # list[(B, num_classes)]
+    global_step: int,
+    label_smoothing: float = 0.,
+) -> tuple[torch.Tensor, list[torch.Tensor], list[torch.Tensor]]:
+    """Makes a full loss including head 'warmup' losses.
+
+    Returns:
+       loss: Scalar tensor
+       losses: List of scalar tensors
+       warmup_weights: List of scalar tensors
+    """
+    losses: list[torch.Tensor] = []
+
+    for head in heads + [predictions]:
+        head_loss = F.cross_entropy(
+            head,
+            labels,
+            label_smoothing=label_smoothing,
+        )
+        losses.append(head_loss)
+    if len(losses) == 1:
+        return losses[0], losses, [torch.tensor(1.0, device=losses[0].device)]
+
+    loss, wamup_weights = _make_warmup_loss(losses[:-1], losses[-1], global_step)
+    return loss, losses, wamup_weights
 
 def train(
     train_config: TrainConfig,
+    model_config: "common_ht.LayerwiseModelConfig",
     state: TrainState,
-    batch_provider: Callable[[], dict[str, Any]],
+    batch_provider: tuple[
+        Callable[[], "common_ht.DatasetSamples"],
+        Callable[[], "common_ht.DatasetSamples"]
+    ],
 ) -> None:
     """Train loop.
 
@@ -155,14 +232,123 @@ def train(
         state.save()
 
     while state.global_step <= train_config.train_steps:
-        if state.step_initializer is not None:
-            if callable(state.step_initializer):
-                state.step_initializer()
-            else:
-                for fn in state.step_initializer:
-                    fn()
+        train_batch = batch_provider[0]()
+        test_batch = batch_provider[1]()
 
-        batch = batch_provider()
+        if common_flags.PRETRAIN_SHARED_FEATURE.value:
+            _ = state.model(
+                train_batch.transformer_images,
+                train_batch.transformer_labels,
+                mask=train_batch.transformer_masks,
+                mask_random_samples=True,
+                enable_fe_dropout=True,
+                only_shared_feature=True,
+            )
+            shared_head_loss, shared_head_acc = state.model.shared_head_outputs.values()
+            assert shared_head_loss is not None
+            state.model_state.loss = shared_head_loss
+            # Add to tensorboard
+            assert state.summary_writer is not None, "Must run `common.init_training(state)` before start training!"
+            state.summary_writer.add_scalar(
+                "loss/shared_head_loss",
+                shared_head_loss,
+                state.global_step,
+            )
+            state.summary_writer.add_scalar(
+                "accuracy/shared_head_accuracy",
+                shared_head_acc,
+                state.global_step,
+            )
+        else:
+            predictions = state.model(
+                train_batch.transformer_images,
+                train_batch.transformer_labels,
+                train_batch.cnn_images,
+                mask=train_batch.transformer_masks,
+                mask_random_samples=True,
+                enable_fe_dropout=True,
+            )
+
+            heads = []
+            if model_config.train_heads:
+                outputs = state.model.layer_outputs.values()
+                # layer_outputs[layer.name] => (inputs, head)
+                heads = [output[1] for output in outputs if output[1] is not None]
+
+            test_predictions = state.model(
+                test_batch.transformer_images,
+                test_batch.transformer_labels,
+                test_batch.cnn_images,
+                mask=test_batch.transformer_masks,
+            )
+
+            labels = train_batch.cnn_labels.long()
+            # Train accuracy
+            pred_labels = torch.argmax(predictions, dim=-1) # (B,)
+            num_cnn_samples: int = train_batch.cnn_labels.numel()
+
+            def _acc(pred):
+                accuracy = (pred == train_batch.cnn_labels).float().sum()
+                return accuracy / num_cnn_samples
+
+            accuracy = _acc(pred_labels)
+            head_preds = [torch.argmax(head, dim=-1) for head in heads]
+            head_accs = [_acc(pred) for pred in head_preds]
+
+            # Test accuracy
+            test_pred_labels = torch.argmax(test_predictions, dim=-1)
+            test_accuracy = (
+                (test_pred_labels == test_batch.cnn_labels)
+                .float()
+                .sum()
+                / num_cnn_samples
+            )
+
+            state.model_state.loss, _, warmup_weights = _make_loss(
+                labels,
+                predictions,
+                heads,
+                state.global_step,
+            )
+
+            # Add to tensorboard
+            summaries = []
+            summaries.append(tf.summary.scalar("loss/ce", state.model_state.loss))
+
+            reg_losses = tf.losses.get_losses(
+                loss_collection=tf.GraphKeys.REGULARIZATION_LOSSES
+            )
+            if reg_losses:
+                summaries.append(
+                    tf.summary.scalar("loss/regularization", tf.reduce_sum(reg_losses))
+                )
+                state.model_state.loss += tf.reduce_sum(reg_losses)
+
+            shared_head_loss, shared_head_acc = state.model.shared_head_outputs.values()
+            if shared_head_loss is not None:
+                if model_config.shared_head_weight > 0.0:
+                    weighted_head_loss = shared_head_loss * model_config.shared_head_weight
+                    state.model_state.loss += weighted_head_loss
+                    summaries.append(
+                        tf.summary.scalar("loss/shared_head_loss", shared_head_loss)
+                    )
+                    summaries.append(
+                        tf.summary.scalar("loss/weighted_shared_head_loss", weighted_head_loss)
+                    )
+
+            for head_id, acc in enumerate(head_accs):
+                summaries.append(tf.summary.scalar(f"accuracy/head-{head_id+1}", acc))
+            for head_id, warmup_weight in enumerate(warmup_weights[:-1]):
+                summaries.append(
+                    tf.summary.scalar(f"warmup_weights/head-{head_id+1}", warmup_weight)
+                )
+            if heads:
+                summaries.append(tf.summary.scalar("warmup_weights/main", warmup_weights[-1]))
+
+            if shared_head_acc is not None and model_config.shared_head_weight > 0.0:
+                summaries.append(
+                    tf.summary.scalar("accuracy/shared_head_accuracy", shared_head_acc)
+                )
 
 
         to_run = {
@@ -209,6 +395,8 @@ def train(
             state.summary_writer.add_summary(
                 util.normalize_tags(results["large"]), global_step=step
             )
+
+        state.global_step += 1
 
     # Final save.
     _save()

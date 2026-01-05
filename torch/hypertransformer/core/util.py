@@ -434,7 +434,7 @@ class MultiFileWriter:
        ```py
        writer = MultiFileWriter("logs")
 
-       writer.add_scalar("loss_1", 0.23, step, name="train")
+       writer.add_scalar("loss_1", 0.23, step, writer_name="train")
        writer.add_scalars(
            "loss_2",
            {
@@ -454,13 +454,13 @@ class MultiFileWriter:
         self.logdir = logdir
         self.writers: dict[Optional[str], SummaryWriter] = {}
 
-    def _get_writer(self, name: Optional[str] = None) -> SummaryWriter:
-        if name not in self.writers:
-            self.writers[name] = SummaryWriter(
-                os.path.join(self.logdir, name or ""),
+    def _get_writer(self, writer_name: Optional[str] = "train") -> SummaryWriter:
+        if writer_name not in self.writers:
+            self.writers[writer_name] = SummaryWriter(
+                os.path.join(self.logdir, writer_name or ""),
                 **self.summary_kwargs,
             )
-        return self.writers[name]
+        return self.writers[writer_name]
 
     def _normalize_tag(self, tag: str) -> str:
         """
@@ -476,23 +476,23 @@ class MultiFileWriter:
         self,
         tag: str,
         value: float,
-        global_step: Optional[int] = None,
-        name: Optional[str] = None
+        global_step: Optional[int] = 0,
+        writer_name: Optional[str] = "train",
     ):
         tag = self._normalize_tag(tag)
-        self._get_writer(name).add_scalar(tag, value, global_step)
+        self._get_writer(writer_name).add_scalar(tag, value, global_step)
 
     def add_scalars(
         self,
         scalars: dict[str, float],
-        global_step: Optional[int] = None
+        global_step: Optional[int] = 0,
     ):
         """
         Write multiple scalars to different sub-writers.
         """
-        for name, value in scalars.items():
-            self._get_writer(name).add_scalar(
-                self._normalize_tag(name), value, global_step
+        for writer_name, value in scalars.items():
+            self._get_writer(writer_name).add_scalar(
+                self._normalize_tag(writer_name), value, global_step
             )
 
     def close(self):
