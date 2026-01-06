@@ -102,10 +102,12 @@ def remove_some_samples(
 # ------------------------------------------------------------
 
 
-class _Generator:
+class _Generator(nn.Module):
     """Generic generator."""
 
     def __init__(self, name: str, model_config: "LayerwiseModelConfig"):
+        super().__init__()
+
         self.name = name
         self.model_config = model_config
         self.num_weight_blocks: Optional[int] = None
