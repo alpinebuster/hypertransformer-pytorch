@@ -6,6 +6,7 @@ import numpy as np
 
 from hypertransformer.core import common_ht
 from hypertransformer.core import datasets
+from hypertransformer.core import util
 from hypertransformer.core import layerwise
 from hypertransformer.core import layerwise_defs # pylint:disable=unused-import
 from hypertransformer.core import train_lib
@@ -49,7 +50,7 @@ def layerwise_params(request):
         (batch_size, channels, image_size, image_size),
         dtype=np.float32,
     )
-    # [0,1,..,num_labels, ..., 0,1,..,num_labels]
+    # [0,1,..,num_labels-1, ..., 0,1,..,num_labels-1]
     labels = np.array(list(range(num_labels))*repetitions, dtype=np.int32)
     ds = datasets.HTDataset(images, labels)
 
@@ -58,15 +59,20 @@ def layerwise_params(request):
         num_cnn_samples=num_cnn_samples,
         image_size=image_size,
     )
+    model_config.shared_input_dim = channels
+
     dataset_info = common_ht.DatasetInfo(
         num_labels=num_labels,
         num_samples_per_label=num_samples_per_label,
         transpose_images=False,
     )
+
+    dataset, label_set = util.parse_dataset_spec(f"emnist:0-{num_labels-1}")
     data_config = common_ht.DatasetConfig(
         dataset_name="dataset",
         ds=ds,
         dataset_info=dataset_info,
+        use_label_subset=label_set,
     )
 
     numpy_arr = train_lib.make_numpy_array(
@@ -89,6 +95,7 @@ def test_number_of_trained_cnn_layers_param_should_give_trained_weights(layerwis
         dataset,
     ) = layerwise_params
     model_config.number_of_trained_cnn_layers = 1
+    model_config.shared_feature_extractor = "4-layer"
 
     model = layerwise.build_model(
         name=model_config.cnn_model_name,

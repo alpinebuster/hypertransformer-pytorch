@@ -1289,7 +1289,11 @@ class LayerwiseModel(nn.Module):
                 all_head_blocks[layer.name] = head_blocks
 
         self.shared_head_outputs = {}
-        if self.shared_head is not None and self.dataset.transformer_real_classes is not None:
+        if (
+            self.shared_head is not None and
+            self.dataset.transformer_real_classes is not None and
+            shared_features is not None
+        ):
             shared_head_loss, shared_head_acc = self.shared_head(
                 shared_features,
                 self.dataset.transformer_real_classes,

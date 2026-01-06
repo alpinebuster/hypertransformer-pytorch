@@ -98,6 +98,7 @@ def make_layerwise_model_config():
         generate_bn=FLAGS.lw_generate_bn,
         generate_bias=FLAGS.lw_generate_bias,
         shared_feature_extractor=FLAGS.shared_feature_extractor,
+        shared_input_dim=FLAGS.shared_input_dim,
         shared_features_dim=FLAGS.shared_features_dim,
         separate_bn_vars=FLAGS.separate_evaluation_bn_vars,
         shared_feature_extractor_padding=FLAGS.shared_feature_extractor_padding,
@@ -278,8 +279,8 @@ def restore_shared_features(
     # Get shared features / head
     shared_keys = [
         k for k in model_state.keys()
-        if "model.shared_features" in k
-        or "loss.shared_head" in k
+        if "shared_feature_extractor" in k
+        or "shared_head" in k
     ]    
     if not shared_keys:
         return None

@@ -271,29 +271,35 @@ class SharedHead(nn.Module):
         self,
         shared_features: torch.Tensor,   # (B, shared_features_dim)
         real_classes: torch.Tensor,      # (B,)
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        logits = self.fc(shared_features)  # (B, total_classes)
-        # Class index normalization
-        classes = real_classes - self.real_class_min  # (B,)
+    ) -> tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
+        # import pdb
+        # pdb.set_trace()
+        if shared_features:
+            logits = self.fc(shared_features)  # (B, total_classes)
+            # Class index normalization
+            classes = real_classes - self.real_class_min  # (B,)
 
-        # loss (TF softmax_cross_entropy ≈ PyTorch cross_entropy)
-        loss = F.cross_entropy(
-            logits,
-            classes,
-            label_smoothing=self.label_smoothing,
-        )
+            # loss (TF softmax_cross_entropy ≈ PyTorch cross_entropy)
+            loss = F.cross_entropy(
+                logits,
+                classes,
+                label_smoothing=self.label_smoothing,
+            )
 
-        # accuracy
-        preds = torch.argmax(logits, dim=-1)
-        accuracy = (preds == classes).float().mean()
+            # accuracy
+            preds = torch.argmax(logits, dim=-1)
+            accuracy = (preds == classes).float().mean()
 
-        return loss, accuracy
+            return loss, accuracy
+        else:
+            return None, None
 
 
 def fe_multi_layer(config: LayerwiseModelConfig, num_layers=2, use_bn=False):
     return SharedMultilayerFeatureExtractor(
         feature_layers=num_layers,
         feature_dim=config.shared_features_dim,
+        in_channels=config.shared_input_dim,
         name="shared_features",
         padding=config.shared_feature_extractor_padding,
         use_bn=use_bn,
