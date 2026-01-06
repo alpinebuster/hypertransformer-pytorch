@@ -4,7 +4,7 @@ import functools
 import glob
 import math
 import os
-from typing import Callable, Optional, Iterable, Union, Any
+from typing import TYPE_CHECKING, Callable, Optional, Iterable, Union
 
 from absl import logging
 import torch
@@ -12,9 +12,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 
-from hypertransformer.core import transformer
+if TYPE_CHECKING:
+    from hypertransformer.core import transformer
 
-TransformerParamsFn = Callable[[int], transformer.TransformerParams]
+TransformerParamsFn = Callable[[int], "transformer.TransformerParams"]
 
 
 # ------------------------------------------------------------
@@ -569,6 +570,7 @@ def same_pad_2d(
     pad_right = pad_w - pad_left
 
     return F.pad(x, (pad_left, pad_right, pad_top, pad_bottom))
+
 
 def print_gpu_detailed_info() -> None:
     logging.info("========== GPU / CUDA INFO ==========")

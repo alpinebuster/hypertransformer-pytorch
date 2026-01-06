@@ -120,7 +120,7 @@ def evaluate_dataset(
 
 
 def apply_layerwise_model(
-    model: layerwise.LayerwiseModel,
+    model: "layerwise.LayerwiseModel",
     model_config: common_ht.LayerwiseModelConfig,
     dataset: common_ht.DatasetSamples
 ):

@@ -233,8 +233,6 @@ def create_layerwise_model(
         model_state=model_state,
         optimizer=optimizer,
         scheduler=scheduler,
-        large_summaries=[],
-        small_summaries=[],
     )
 
 
@@ -259,8 +257,6 @@ def create_shared_feature_model(
         model_state=model_state,
         optimizer=optimizer,
         scheduler=scheduler,
-        large_summaries=[],
-        small_summaries=[],
     )
 
 
@@ -270,7 +266,7 @@ def create_shared_feature_model(
 
 
 def restore_shared_features(
-    model: nn.Module,
+    model: "layerwise.LayerwiseModel",
     checkpoint: str = common_flags.RESTORE_SHARED_FEATURES_FROM.value,
 ) -> Optional[nn.Module]:
     """Restores shared feature extractor variables from a checkpoint."""
@@ -299,7 +295,7 @@ def restore_shared_features(
 
 
 # ------------------------------------------------------------
-#   Main Entrance
+#   Meta Train Entrance
 # ------------------------------------------------------------
 
 

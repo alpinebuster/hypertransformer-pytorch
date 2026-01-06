@@ -417,7 +417,7 @@ class BaseCNNLayer(tf.Module):
         """Input-dependent layer setup."""
         raise NotImplementedError
 
-    def __call__(self, inputs, training=True):
+    def __call__(self, inputs, training: bool = True):
         raise NotImplementedError
 
     def _var_getter(self, offsets, weights, shape, name):
@@ -599,7 +599,7 @@ class ConvLayer(BaseCNNLayer):
         )
         self.generator.set_feature_extractor_class(feature_extractor_class)
 
-    def __call__(self, inputs, training=True):
+    def __call__(self, inputs, training: bool = True):
         # Layers should be created in `__call__` to properly build weights from
         # Transformer outputs for both training and evaluation.
         self.conv = tf.layers.Conv2D(
@@ -627,8 +627,8 @@ class ConvLayer(BaseCNNLayer):
         #
         # ------------------------------------------------------------------
         # In a standard CNN:
-        #   - During training, training=True  -> use batch mean/variance
-        #   - During testing,  training=False -> use global mean/variance (moving averages) from training
+        #   - During training, training is True  -> use batch mean/variance
+        #   - During testing,  training is False -> use global mean/variance (moving averages) from training
         #   Assumes train/test data come from the same distribution.
         #
         # In this hypertransformer + few-shot setting:
@@ -636,7 +636,7 @@ class ConvLayer(BaseCNNLayer):
         #   - CNN weights are generated per task, not fixed
         #   - There is no stable global feature distribution
         #
-        # Therefore, BatchNorm must always use batch statistics (training=True)
+        # Therefore, BatchNorm must always use batch statistics (training is True)
         # to normalize features based on the current task's data.
         """
         output = self.bn(output, training=True)
@@ -752,7 +752,7 @@ class LogitsLayer(BaseCNNLayer):
         )
         self.generator.set_feature_extractor_class(feature_extractor_class)
 
-    def __call__(self, tensor, training=True):
+    def __call__(self, tensor, training: bool = True):
         self.fc = tf.layers.Dense(units=self.model_config.num_labels, name="fc")
         # Global Average Pooling
         # [batch, height, width, channels]
@@ -827,7 +827,7 @@ class FlattenLogitsLayer(LogitsLayer):
         )
         self.generator.set_feature_extractor_class(feature_extractor_class)
 
-    def __call__(self, tensor, training=True):
+    def __call__(self, tensor, training: bool = True):
         # [batch, H, W, C] → [batch, H*W*C]
         flatten = tf.layers.Flatten()
 
@@ -951,7 +951,7 @@ class LayerwiseModel(common_ht.Model):
         self,
         inputs,
         weight_blocks=None,
-        training=True,
+        training: bool = True,
     ):
         """Passes input tensors through a built CNN model."""
         if weight_blocks is None:
