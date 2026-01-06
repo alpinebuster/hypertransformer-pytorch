@@ -66,7 +66,7 @@ class TrainState:
     scheduler: Optional[torch.optim.lr_scheduler.LRScheduler]
     global_step: int = 0
 
-    checkpoint_dir: str = FLAGS.train_log_dir
+    checkpoint_dir: str = "logs"
     checkpoint_suffix: str = "model"
 
     summary_writer: Optional[util.MultiFileWriter] = None

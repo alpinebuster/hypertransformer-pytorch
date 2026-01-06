@@ -4,6 +4,7 @@ import dataclasses
 import functools
 import os
 import random
+import glob
 
 from typing import Callable, Optional, Tuple
 
@@ -53,8 +54,12 @@ def _convert_bool(arr: np.ndarray):
 def _load_cache(data_config: DatasetConfig) -> Optional[dict[int, np.ndarray]]:
     """Loads cached dataset from a saved NumPy array."""
     folder = os.path.join(data_config.cache_path, data_config.dataset_name)
-    path = os.path.join(data_config.cache_path, data_config.dataset_name + ".npy")
-    logging.info(f'Looking for cache in "{data_config.cache_path}"')
+
+    pattern = os.path.join(data_config.cache_path, f"*{data_config.dataset_name}*.npy")
+    files = glob.glob(pattern)
+    path = files[0] if files else ""
+
+    logging.info(f'Looking for cache in "{data_config.cache_path}..."')
     if os.path.exists(path):
         # Reading a NumPy cache.
         with open(path, "rb") as dev:

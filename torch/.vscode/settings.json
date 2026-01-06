@@ -16,6 +16,8 @@
         "miniimagenet",
         "NCHW",
         "NHWC",
+        "nohup",
+        "omniglot",
         "onnx",
         "randn",
         "randperm",

@@ -12,10 +12,10 @@ from absl import flags
 import numpy as np
 
 INPUT_PATH = flags.DEFINE_string(
-    "input_path", "", "Path with miniImageNet pickle files."
+    "input_path", "", "Path with miniimagenet pickle files."
 )
 OUTPUT_PATH = flags.DEFINE_string(
-    "output_path", "", "Path with miniImageNet pickle files."
+    "output_path", "", "Path with miniimagenet pickle files."
 )
 
 
@@ -54,6 +54,7 @@ def get_combined(data):
 def main(argv):
     if len(argv) > 1:
         raise app.UsageError("Too many command-line arguments.")
+
     data = get_data(INPUT_PATH.value)
     combined = get_combined(data)
     combined_ch_first = combined.transpose(0, 1, 4, 2, 3)
@@ -61,8 +62,16 @@ def main(argv):
     try:
         os.makedirs(OUTPUT_PATH.value, exist_ok=True)
     finally:
-        np.save(os.path.join(OUTPUT_PATH.value, "miniimagenet"), combined_ch_first)
+        np.save(
+            os.path.join(OUTPUT_PATH.value, "miniimagenet_ch_first.npy"),
+            combined_ch_first
+        )
 
 
 if __name__ == "__main__":
+    """
+    ```sh
+    python ./hypertransformer/utils/cache_miniimagenet.py --input_path=../miniimagenet/cache --output_path=../miniimagenet/cache
+    ```
+    """
     app.run(main)

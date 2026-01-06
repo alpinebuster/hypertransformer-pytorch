@@ -220,7 +220,7 @@ def create_layerwise_model(
     optim_config: common.OptimizerConfig,
 ):
     """Creates a hierarchical Transformer-CNN model."""
-    logging.info("Building the model")
+    logging.info("Building the model...")
 
     model = layerwise.build_model(
         model_config.cnn_model_name,
@@ -268,9 +268,10 @@ def create_shared_feature_model(
 
 def restore_shared_features(
     model: "layerwise.LayerwiseModel",
-    checkpoint: str = common_flags.RESTORE_SHARED_FEATURES_FROM.value,
+    checkpoint: Optional[str] = None,
 ) -> Optional["layerwise.LayerwiseModel"]:
     """Restores shared feature extractor variables from a checkpoint."""
+    checkpoint = checkpoint or common_flags.RESTORE_SHARED_FEATURES_FROM.value
     if not checkpoint:
         return None
 
