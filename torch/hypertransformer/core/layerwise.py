@@ -1261,6 +1261,9 @@ class LayerwiseModel(nn.Module):
             )
 
         for layer, generate_weights in zip(self.layers, generate_weights_per_layers):
+            # Just to make Pylance 100% happy!!!
+            layer = cast(BaseCNNLayer, layer)
+
             # cnn_builder
             weight_blocks = layer.create(
                 input_tensor=inputs,
@@ -1324,6 +1327,9 @@ class LayerwiseModel(nn.Module):
 
         self.layer_outputs = {}
         for layer, layer_blocks in zip(self.layers, weight_blocks.weight_blocks):
+            # Just to make Pylance 100% happy!!!
+            layer = cast(BaseCNNLayer, layer)
+
             # cnn
             inputs = layer.apply(
                 inputs,
@@ -1388,6 +1394,9 @@ class LayerwiseModel(nn.Module):
         reg_losses = []
 
         for layer in self.layers:
+            # Just to make Pylance 100% happy!!!
+            layer = cast(BaseCNNLayer, layer)
+
             if hasattr(layer, "_extra_losses") and layer._extra_losses:
                 reg_losses.extend(layer._extra_losses)
             if hasattr(layer, "head") and layer.head is not None:

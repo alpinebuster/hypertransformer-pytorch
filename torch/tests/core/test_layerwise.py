@@ -112,6 +112,8 @@ def test_number_of_trained_cnn_layers_param_should_give_trained_weights(layerwis
 
     model._evaluate(dataset.cnn_images, weight_blocks=weights)
 
+    # import pdb
+    # pdb.set_trace()
     # The first layer: real trainable parameters
     first_kernel = model.layers[0].kernel
     assert isinstance(first_kernel, torch.nn.Parameter)
