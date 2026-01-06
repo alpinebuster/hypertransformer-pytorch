@@ -360,7 +360,7 @@ def _extract_checkpoint_step(s: str) -> int:
 
 def _find_latest_checkpoint(ckpt_dir: str) -> Optional[str]:
     """Find latest checkpoint in directory by step number."""
-    all_checkpoints = glob.glob(os.path.join(ckpt_dir, "*.pt"))
+    all_checkpoints = glob.glob(os.path.join(ckpt_dir, "*_[0-9]*.pt"))
     if not all_checkpoints:
         return None
 
@@ -421,6 +421,7 @@ def load_variables(
     if var_list is None:
         return dict(state_dict)
 
+    # Only load the specified variable
     return {
         name: state_dict[name]
         for name in var_list

@@ -269,7 +269,7 @@ def create_shared_feature_model(
 def restore_shared_features(
     model: "layerwise.LayerwiseModel",
     checkpoint: str = common_flags.RESTORE_SHARED_FEATURES_FROM.value,
-) -> Optional[nn.Module]:
+) -> Optional["layerwise.LayerwiseModel"]:
     """Restores shared feature extractor variables from a checkpoint."""
     if not checkpoint:
         return None
@@ -279,8 +279,7 @@ def restore_shared_features(
     # Get shared features / head
     shared_keys = [
         k for k in model_state.keys()
-        if "shared_feature_extractor" in k
-        or "shared_head" in k
+        if k.startswith("shared_feature_extractor.") or k.startswith("shared_head.")
     ]    
     if not shared_keys:
         return None
@@ -290,6 +289,7 @@ def restore_shared_features(
         var_list=shared_keys,
         map_location="cpu",
     )
+    # `strict=False` → Load only what exists
     model.load_state_dict(loaded_vars, strict=False)
 
     return model
@@ -349,11 +349,13 @@ def train(
     state = create_model(**args)
 
     restored = common.init_training(state)
-    init_op = restore_shared_features(
-        model=state.model,
-    )
-    if not restored and init_op is not None:
-        sess.run(init_op)
+    if not restored:
+        model = restore_shared_features(
+            model=state.model,
+        )
+        if model:
+            state.model = model
+
     common.train(
         train_config,
         layerwise_model_config,

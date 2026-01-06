@@ -83,22 +83,21 @@ class TrainState:
         torch.save({
             "model": self.model.state_dict(),
             "optimizer": self.optimizer.state_dict(),
-            "step": self.global_step,
+            "global_step": self.global_step,
         }, path)
 
-    def load_latest(self) -> bool:
-        restore_path = os.path.dirname(
-            os.path.join(self.checkpoint_dir, self.checkpoint_suffix)
-        )
-        ckpts = util.latest_checkpoint(restore_path)
-        if not ckpts:
-            return False
-        ckpt = max(ckpts, key=os.path.getmtime)
-        data = torch.load(ckpt, map_location="cpu")
+    def load_latest(self) -> tuple[bool, str]:
+        ckpt_path = util.latest_checkpoint(self.checkpoint_dir)
+        if not ckpt_path:
+            return False, str(ckpt_path)
+
+        data = torch.load(ckpt_path, map_location="cpu")
+
         self.model.load_state_dict(data["model"])
         self.optimizer.load_state_dict(data["optimizer"])
-        self.global_step = int(data.get("step", 0))
-        return True
+        self.global_step = int(data.get("global_step", 0))
+
+        return True, str(ckpt_path)
 
 
 @dataclasses.dataclass
@@ -405,9 +404,9 @@ def init_training(state: TrainState) -> bool:
     if state.summary_writer is None:
         state.summary_writer = util.MultiFileWriter(state.checkpoint_dir)
 
-    restored = state.load_latest()
+    restored, ckpt_path = state.load_latest()
     if not restored:
         logging.info("No checkpoint found.")
     else:
-        logging.info(f"Restored from step {state.global_step}")
+        logging.info(f"Restored from {ckpt_path}, step {state.global_step}")
     return restored
