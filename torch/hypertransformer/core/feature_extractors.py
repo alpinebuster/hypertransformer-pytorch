@@ -272,8 +272,6 @@ class SharedHead(nn.Module):
         shared_features: Optional[torch.Tensor],   # (B, shared_features_dim)
         real_classes: torch.Tensor,      # (B,)
     ) -> tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
-        # import pdb
-        # pdb.set_trace()
         if shared_features is not None:
             logits = self.fc(shared_features)  # (B, total_classes)
             # Class index normalization

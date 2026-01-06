@@ -1,7 +1,7 @@
 # Call from the tf root as
 # `./scripts/omniglot_1shot_v1.sh` with flags
 # "--data_numpy_dir=<omniglot_cache> --train_log_dir=<output_path>"
-# e.g. `nohup ./scripts/omniglot_1shot_v1.sh --data_dir=../omniglot --data_numpy_dir=../omniglot/cache --train_log_dir=../omniglot/logs > omniglot.log 2>&1 &`
+# e.g. `nohup ./scripts/omniglot_1shot_v1.sh --data_dir=../omniglot --data_numpy_dir=../omniglot/cache --train_log_dir=../omniglot/logs/tf > omniglot.log 2>&1 &`
 
 python -m hypertransformer.train --num_layerwise_features=8 --default_num_channels=8 \
   --samples_transformer=20 --samples_cnn=60 --num_labels=20 --learning_rate=0.02 \

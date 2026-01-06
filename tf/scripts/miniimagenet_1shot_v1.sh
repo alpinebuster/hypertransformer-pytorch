@@ -1,11 +1,11 @@
 # Call `./scripts/miniimagenet_1shot_v1.sh` from the `tf` root with flags:
 #   "--data_dir=<miniimagenet> --data_numpy_dir=<miniimagenet_cache> --train_log_dir=<output_path>"
 # 
-# e.g. `nohup ./scripts/miniimagenet_1shot_v1.sh --data_dir=../miniimagenet --data_numpy_dir=../miniimagenet/cache --train_log_dir=../miniimagenet/logs > miniimagenet.log 2>&1 &`
+# e.g. `nohup ./scripts/miniimagenet_1shot_v1.sh --data_dir=../miniimagenet --data_numpy_dir=../miniimagenet/cache --train_log_dir=../miniimagenet/logs/tf > miniimagenet.log 2>&1 &`
 # DS: `--train_dataset=miniimagenet` # or imagenette, emnist
 
 python -m hypertransformer.train --num_layerwise_features=16 --default_num_channels=16 \
-  --samples_transformer=500 --samples_cnn=100 --num_labels=5 --learning_rate=0.01 \
+  --samples_transformer=5 --samples_cnn=100 --num_labels=5 --learning_rate=0.01 \
   --learning_rate_decay_steps=100000.0 --learning_rate_decay_rate=0.95 \
   --train_steps=4000000 --steps_between_saves=50000 --lw_key_query_dim=0.5 \
   --lw_value_dim=0.5 --lw_inner_dim=0.5 --cnn_model_name='maxpool-4-layer' \

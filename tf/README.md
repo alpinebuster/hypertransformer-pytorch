@@ -41,8 +41,8 @@ Folder `scripts` contains several training scripts for `omniglot`,
 They can be executed as follows:
 
 ```shell
-./scripts/omniglot_1shot_v1.sh --data_numpy_dir=../omniglot/cache --train_log_dir=../omniglot/logs
-tensorboard --logdir=../omniglot/logs
+./scripts/omniglot_1shot_v1.sh --data_numpy_dir=../omniglot/cache --train_log_dir=../omniglot/logs/tf
+tensorboard --logdir=../omniglot/logs/tf
 ```
 
 > The evaluation script `evaluate.py` can be executed in parallel to

@@ -253,10 +253,12 @@ def train(
         )
         train_batch = batch_provider[0]()
         test_batch = batch_provider[1]()
+
         train_support_images = train_batch.transformer_images.to(device)
         train_support_labels = train_batch.transformer_labels.to(device)
         train_query_images = train_batch.cnn_images.to(device)
         train_query_labels = train_batch.cnn_labels.to(device)
+
         test_support_images = test_batch.transformer_images.to(device)
         test_support_labels = test_batch.transformer_labels.to(device)
         test_query_images = test_batch.cnn_images.to(device)
