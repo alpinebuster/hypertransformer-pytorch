@@ -1144,7 +1144,7 @@ class LayerwiseModel(nn.Module):
     ):
         super().__init__()
 
-        self.layers = layers
+        self.layers = nn.ModuleList(layers)
         self.shared_feature_extractor = feature_extractors.get_shared_feature_extractor(
             model_config
         )
