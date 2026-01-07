@@ -481,7 +481,7 @@ class BaseCNNLayer(nn.Module):
     ) -> torch.Tensor:
         raise NotImplementedError
 
-    def _var_getter(self, weights: list[torch.Tensor], name: str) -> Optional[torch.Tensor]:
+    def _var_getter(self, weights: Optional[list[torch.Tensor]], name: str) -> Optional[torch.Tensor]:
         """Call it each time a variable is created.
         name = "conv/kernel"
                 │
@@ -868,8 +868,8 @@ class ConvLayer(BaseCNNLayer):
             # NOTE: always True
             x = F.batch_norm(
                 x,
-                bn_layer.running_mean,
-                bn_layer.running_var,
+                running_mean=None, # bn_layer.running_mean
+                running_var=None, # bn_layer.running_var
                 weight=gamma,
                 bias=beta,
                 training=True,
@@ -883,7 +883,10 @@ class ConvLayer(BaseCNNLayer):
             x = self.act_fn(x)
         return x
 
-    def _var_getter(self, weights: list[torch.Tensor], name: str) -> Optional[torch.Tensor]:
+    def _var_getter(self, weights: Optional[list[torch.Tensor]], name: str) -> Optional[torch.Tensor]:
+        if weights is None:
+            return None
+
         if name.endswith("kernel"):
             if self.generate_weights:
                 """Take the kernel part from each w
@@ -996,10 +999,6 @@ class LogitsLayer(BaseCNNLayer):
         self.generator.set_feature_extractor_class(feature_extractor_class)
 
         self.gap = nn.AdaptiveAvgPool2d(output_size=(1, 1))
-        self.fc = nn.Linear(
-            in_features=inputs.shape[1],
-            out_features=self.model_config.num_labels,
-        )
 
     def forward(
         self,
@@ -1019,10 +1018,16 @@ class LogitsLayer(BaseCNNLayer):
             p=self.model_config.cnn_dropout_rate,
             training=training,
         )
-        # [batch, channels] → [batch, num_labels]
-        return self.fc(dropout_tensor)
 
-    def _var_getter(self, weights: list[torch.Tensor], name: str) -> Optional[torch.Tensor]:
+        # [batch, channels] → [batch, num_labels]
+        W = selected_weights["kernel"]
+        b = selected_weights["bias"]
+        assert W is not None and b is not None
+        # input:  [B, in_features]
+        # weight: [out_features, in_features]
+        return F.linear(dropout_tensor, weight=W.t(), bias=b)
+
+    def _var_getter(self, weights: Optional[list[torch.Tensor]], name: str) -> Optional[torch.Tensor]:
         if weights is None:
             return None
 
@@ -1039,8 +1044,7 @@ class LogitsLayer(BaseCNNLayer):
         if name.endswith("bias"):
             n = self.generator.weight_block_size - 1
             ws = [w[n] for w in weights]
-            output = torch.stack(ws, dim=-1)
-            return output
+            return torch.stack(ws, dim=-1)
 
         return None
 
@@ -1059,7 +1063,7 @@ class FlattenLogitsLayer(LogitsLayer):
         """Input-specific setup."""
         self.input_dim = int(inputs.shape[1])
 
-        width, height = int(inputs.shape[1]), int(inputs.shape[2])
+        height, width = int(inputs.shape[-2]), int(inputs.shape[-1])
 
         if self.num_features is None:
             self.num_features = self.input_dim
@@ -1091,11 +1095,6 @@ class FlattenLogitsLayer(LogitsLayer):
         )
         self.generator.set_feature_extractor_class(feature_extractor_class)
 
-        self.fc = nn.Linear(
-            in_features=inputs.shape[1],
-            out_features=self.model_config.num_labels,
-        )
-
     def forward(
         self,
         inputs: torch.Tensor,
@@ -1111,8 +1110,14 @@ class FlattenLogitsLayer(LogitsLayer):
             p=self.model_config.cnn_dropout_rate,
             training=training,
         )
+
         # [batch, C*H*W] → [batch, num_labels]
-        return self.fc(dropout_tensor)
+        W = selected_weights["kernel"]
+        b = selected_weights["bias"]
+        assert W is not None and b is not None
+        # input:  [B, in_features]
+        # weight: [out_features, in_features]
+        return F.linear(dropout_tensor, weight=W.t(), bias=b)
 
 
 # ------------------------------------------------------------

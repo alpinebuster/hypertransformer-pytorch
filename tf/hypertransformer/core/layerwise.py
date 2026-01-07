@@ -777,8 +777,7 @@ class LogitsLayer(BaseCNNLayer):
         if name.endswith("/bias"):
             n = self.generator.weight_block_size - 1
             ws = [w[n] for w in weights]
-            output = tf.stack(ws, axis=-1)
-            return output
+            return tf.stack(ws, axis=-1)
 
         return None
 

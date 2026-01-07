@@ -243,7 +243,8 @@ def train(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     state.model.to(device)
     for name, param in state.model.named_parameters():
-        print(f"{name}, {param.device}")
+        print(f"{name}, device: {param.device}")
+        print(f"{name}, grad: {param.grad is None}")
     state.model.dataset.to(device)
 
     start_step = state.global_step
