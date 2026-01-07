@@ -55,7 +55,7 @@ def _load_cache(data_config: DatasetConfig) -> Optional[dict[int, np.ndarray]]:
     """Loads cached dataset from a saved NumPy array."""
     folder = os.path.join(data_config.cache_path, data_config.dataset_name)
 
-    pattern = os.path.join(data_config.cache_path, f"*{data_config.dataset_name}*.npy")
+    pattern = os.path.join(data_config.cache_path, f"*{data_config.dataset_name}_ch_first*.npy")
     files = glob.glob(pattern)
     path = files[0] if files else ""
 
@@ -323,7 +323,7 @@ def _make_dataset_balanced(
     transformer_images, transformer_labels, transformer_classes = batches[0]
     cnn_images, cnn_labels, cnn_classes = batches[1]
 
-    # NCHW
+    # BCHW
     if len(transformer_images.shape) == 3:
         transformer_images = transformer_images.unsqueeze(dim=-3)
     if len(cnn_images.shape) == 3:

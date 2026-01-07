@@ -719,7 +719,7 @@ class ConvLayer(BaseCNNLayer):
 
     def _setup(self, inputs: torch.Tensor) -> None:
         """Input-specific setup."""
-        # inputs -> [NCHW]
+        # inputs -> [BCHW]
         self.input_dim = int(inputs.shape[1])
         if self.num_features is None:
             self.num_features = max(self.output_dim, self.input_dim)
@@ -740,7 +740,9 @@ class ConvLayer(BaseCNNLayer):
         in_ch = inputs.shape[1]
         out_ch = self.output_dim
         self.default_kernel = nn.Parameter(torch.empty(out_ch, in_ch, self.kernel_size, self.kernel_size))
-        nn.init.kaiming_normal_(self.default_kernel, mode="fan_out", nonlinearity="relu")
+        # fan_in: Maintain the variance stability of the activation value in the forward propagation
+        # fan_out: Maintain the variance stability of the gradient in the backpropagation
+        nn.init.kaiming_normal_(self.default_kernel, mode="fan_in", nonlinearity="relu")
         self.default_bias = nn.Parameter(torch.zeros(out_ch))
         if self.add_trainable_weights:
             self.var_weights["kernel"] = nn.Parameter(torch.zeros_like(self.default_kernel))
@@ -794,7 +796,7 @@ class ConvLayer(BaseCNNLayer):
                 kernel = self.default_kernel
             else:
                 kernel = nn.Parameter(torch.empty(self.output_dim, inputs.shape[1], self.kernel_size, self.kernel_size))
-                nn.init.kaiming_normal_(kernel, mode="fan_out", nonlinearity="relu")
+                nn.init.kaiming_normal_(kernel, mode="fan_in", nonlinearity="relu")
         if bias is None:
             if hasattr(self, "default_bias"):
                 bias = self.default_bias
@@ -813,9 +815,8 @@ class ConvLayer(BaseCNNLayer):
         x = F.conv2d(
             inputs,
             weight=kernel,
-            bias=bias if self.generate_bias else None,
+            bias=bias,
             stride=self.stride,
-            padding=self.padding,
         )
         if not self.act_after_bn:
             x = self.act_fn(x)
@@ -973,7 +974,7 @@ class LogitsLayer(BaseCNNLayer):
 
     def _setup(self, inputs: torch.Tensor) -> None:
         """Input-specific setup."""
-        # inputs -> [NCHW]
+        # inputs -> [BCHW]
         self.input_dim = int(inputs.shape[1])
 
         if self.num_features is None:
@@ -1065,6 +1066,7 @@ class FlattenLogitsLayer(LogitsLayer):
         if self.model_config.logits_feature_extractor in ["", "default", "mix"]:
             feature_extractor_class = functools.partial(
                 feature_extractors.SimpleConvFeatureExtractor,
+                in_channels=inputs.shape[1],
                 feature_layers=1,
                 feature_dim=self.num_features,
                 input_size=int(inputs.shape[1]),

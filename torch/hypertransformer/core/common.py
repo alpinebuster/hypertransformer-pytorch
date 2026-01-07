@@ -78,7 +78,7 @@ class TrainState:
         os.makedirs(self.checkpoint_dir, exist_ok=True)
         path = os.path.join(
             self.checkpoint_dir,
-            f"{self.checkpoint_suffix}_{self.global_step}.pt"
+            f"{self.checkpoint_suffix}-{self.global_step}.pt"
         )
         torch.save({
             "model": self.model.state_dict(),

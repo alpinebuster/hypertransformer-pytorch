@@ -360,7 +360,7 @@ def _extract_checkpoint_step(s: str) -> int:
 
 def _find_latest_checkpoint(ckpt_dir: str) -> Optional[str]:
     """Find latest checkpoint in directory by step number."""
-    all_checkpoints = glob.glob(os.path.join(ckpt_dir, "*_[0-9]*.pt"))
+    all_checkpoints = glob.glob(os.path.join(ckpt_dir, "*-[0-9]*.pt"))
     if not all_checkpoints:
         return None
 
@@ -585,7 +585,7 @@ def print_gpu_detailed_info() -> None:
         logging.info("====================================")
         return
 
-    logging.info("Visible GPU Count:", torch.cuda.device_count())
+    logging.info(f"Visible GPU Count: {torch.cuda.device_count()}")
 
     for i in range(torch.cuda.device_count()):
         props = torch.cuda.get_device_properties(i)

@@ -14,8 +14,6 @@
         "MAML",
         "maxpool",
         "miniimagenet",
-        "NCHW",
-        "NHWC",
         "nohup",
         "omniglot",
         "onnx",

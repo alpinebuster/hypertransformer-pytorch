@@ -16,6 +16,12 @@ FLAGS = flags.FLAGS
 
 
 class FeatureExtractor(nn.Module):
+    """
+    feature_extractor -> SimpleConvFeatureExtractor       -> Activation Feature Extractor (LogitsLayer)
+    shared_features   -> SharedMultilayerFeatureExtractor -> Image Feature Extractor
+                      -> PassthroughFeatureExtractor      -> FlattenLogitsLayer
+    """
+
     def __init__(self, name: str):
         super().__init__()
         self.name = name
@@ -55,9 +61,11 @@ class SimpleConvFeatureExtractor(FeatureExtractor):
         assert feature_dim > 0
 
         # Stride logic (same as TF implementation)
+        def_kernel_size = self.kernel_size
         def_stride = 2
         if input_size < kernel_size:
             self.kernel_size = input_size
+            def_kernel_size = input_size
             def_stride = 1
 
         # PyTorch 1.10+ supports "same" / "valid"
@@ -69,13 +77,14 @@ class SimpleConvFeatureExtractor(FeatureExtractor):
             # The first `feature_layers - 1` convolutional layers use a stride of 2 to progressively reduce the spatial dimensions,
             # while the final layer uses a stride of `1` to extract features without additional downsampling.
             stride = def_stride if idx < feature_layers - 1 else 1
+            self.kernel_size = def_kernel_size if idx < feature_layers - 1 else 1
             self.convs.append(
                 nn.Conv2d(
                     in_channels=in_channels if idx == 0 else feature_dim,
                     out_channels=feature_dim,
                     kernel_size=(self.kernel_size, self.kernel_size),
                     stride=(stride, stride),
-                    padding=0,
+                    padding=0, # Default to `valid` mode
                     bias=True,
                 )
             )
@@ -85,20 +94,23 @@ class SimpleConvFeatureExtractor(FeatureExtractor):
         if not self.convs:
             return None
 
+        # BCHW
         tensor = x
         outputs = []
 
         for conv in self.convs:
-            # TensorFlow -> NHWC, `if int(tensor.shape[1]) < kernel_size: break``
-            # PyTorch    -> NCHW, spatial dims are [-2], [-1]
+            # TensorFlow -> BHWC, `if int(tensor.shape[1]) < kernel_size: break``
+            # PyTorch    -> BCHW, spatial dims are [-2], [-1]
             if tensor.shape[-2] < self.kernel_size or tensor.shape[-1] < self.kernel_size:
-                raise RuntimeError(
+                logging.info(
                     f"{self.__class__.__name__} cannot apply Conv2d at layer {len(outputs)+1}: "
                     f"spatial size {(tensor.shape[-2], tensor.shape[-1])} "
                     f"is smaller than kernel_size={self.kernel_size}. "
                     f"Check input_size, kernel_size, stride, or padding."
                 )
+                break
 
+            conv = cast(nn.Conv2d, conv)
             if self.padding == "same":
                 tensor = same_pad_2d(
                     tensor,
@@ -106,8 +118,12 @@ class SimpleConvFeatureExtractor(FeatureExtractor):
                     stride=cast(tuple[int, int], conv.stride),
                     dilation=cast(tuple[int, int], conv.dilation),
                 )
-
-            tensor = conv(tensor)
+            tensor = F.conv2d(
+                tensor,
+                weight=conv.weight,
+                bias=conv.bias,
+                stride=conv.stride,
+            )
             feature = tensor
 
             # While the output is not employing nonlinearity, layer-to-layer
@@ -121,11 +137,11 @@ class SimpleConvFeatureExtractor(FeatureExtractor):
         #    [B, H, W, C] → [B, H_i, W_i, feature_dim] → [B, feature_dim] → [B, feature_layers*feature_dim]
         # PyTorch
         #    [B, C, H, W] → [B, feature_dim, H_i, W_i] → [B, feature_dim, 1, 1] → [B, feature_layers*feature_dim]
-        pooled = [
+        outputs = [
             self.gap(feat).flatten(1)
             for feat in outputs
         ]
-        return torch.cat(pooled, dim=-1)
+        return torch.cat(outputs, dim=-1)
 
 
 class SharedMultilayerFeatureExtractor(FeatureExtractor):
@@ -185,7 +201,7 @@ class SharedMultilayerFeatureExtractor(FeatureExtractor):
                     out_channels=feature_dim,
                     kernel_size=(self.kernel_size, self.kernel_size),
                     stride=(stride, stride),
-                    padding=0,
+                    padding=0, # Default to `valid` mode
                     bias=True,
                 )
             )
@@ -196,13 +212,15 @@ class SharedMultilayerFeatureExtractor(FeatureExtractor):
         tensor = x
         for idx, (conv, bn) in enumerate(zip(self.convs, self.bns)):
             if tensor.shape[-2] < self.kernel_size or tensor.shape[-1] < self.kernel_size:
-                raise RuntimeError(
+                logging.info(
                     f"{self.__class__.__name__} cannot apply Conv2d at layer {idx+1}: "
                     f"spatial size {(tensor.shape[-2], tensor.shape[-1])} "
                     f"is smaller than kernel_size={self.kernel_size}. "
                     f"Check input_size, kernel_size, stride, or padding."
                 )
+                break
 
+            conv = cast(nn.Conv2d, conv)
             if self.padding == "same":
                 tensor = same_pad_2d(
                     tensor,
@@ -210,8 +228,12 @@ class SharedMultilayerFeatureExtractor(FeatureExtractor):
                     stride=cast(tuple[int, int], conv.stride),
                     dilation=cast(tuple[int, int], conv.dilation),
                 )
-
-            tensor = conv(tensor)
+            tensor = F.conv2d(
+                tensor,
+                weight=conv.weight,
+                bias=conv.bias,
+                stride=conv.stride,
+            )
             tensor = bn(tensor)
         return self.gap(tensor).flatten(1) 
 

@@ -234,6 +234,7 @@ def create_layerwise_model(
         model_state=model_state,
         optimizer=optimizer,
         scheduler=scheduler,
+        checkpoint_dir=FLAGS.train_log_dir,
     )
 
 
@@ -258,6 +259,7 @@ def create_shared_feature_model(
         model_state=model_state,
         optimizer=optimizer,
         scheduler=scheduler,
+        checkpoint_dir=FLAGS.train_log_dir,
     )
 
 

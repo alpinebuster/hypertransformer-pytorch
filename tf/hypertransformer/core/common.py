@@ -130,6 +130,7 @@ def train(train_config: TrainConfig, state: TrainState, run_options=None) -> Non
     starting_time = time.time()
 
     def _save():
+        os.makedirs(FLAGS.train_log_dir, exist_ok=True)
         state.saver.save(
             sess,
             os.path.join(FLAGS.train_log_dir, state.checkpoint_suffix),
