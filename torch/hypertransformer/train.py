@@ -98,6 +98,7 @@ def make_layerwise_model_config():
         generate_bn=FLAGS.lw_generate_bn,
         generate_bias=FLAGS.lw_generate_bias,
         shared_feature_extractor=FLAGS.shared_feature_extractor,
+        shared_input_dim=FLAGS.shared_input_dim,
         shared_features_dim=FLAGS.shared_features_dim,
         separate_bn_vars=FLAGS.separate_evaluation_bn_vars,
         shared_feature_extractor_padding=FLAGS.shared_feature_extractor_padding,
@@ -219,7 +220,7 @@ def create_layerwise_model(
     optim_config: common.OptimizerConfig,
 ):
     """Creates a hierarchical Transformer-CNN model."""
-    logging.info("Building the model")
+    logging.info("Building the model...")
 
     model = layerwise.build_model(
         model_config.cnn_model_name,
@@ -233,8 +234,7 @@ def create_layerwise_model(
         model_state=model_state,
         optimizer=optimizer,
         scheduler=scheduler,
-        large_summaries=[],
-        small_summaries=[],
+        checkpoint_dir=FLAGS.train_log_dir,
     )
 
 
@@ -259,8 +259,7 @@ def create_shared_feature_model(
         model_state=model_state,
         optimizer=optimizer,
         scheduler=scheduler,
-        large_summaries=[],
-        small_summaries=[],
+        checkpoint_dir=FLAGS.train_log_dir,
     )
 
 
@@ -270,10 +269,11 @@ def create_shared_feature_model(
 
 
 def restore_shared_features(
-    model: nn.Module,
-    checkpoint: str = common_flags.RESTORE_SHARED_FEATURES_FROM.value,
-) -> Optional[nn.Module]:
+    model: "layerwise.LayerwiseModel",
+    checkpoint: Optional[str] = None,
+) -> Optional["layerwise.LayerwiseModel"]:
     """Restores shared feature extractor variables from a checkpoint."""
+    checkpoint = checkpoint or common_flags.RESTORE_SHARED_FEATURES_FROM.value
     if not checkpoint:
         return None
 
@@ -282,8 +282,7 @@ def restore_shared_features(
     # Get shared features / head
     shared_keys = [
         k for k in model_state.keys()
-        if "model.shared_features" in k
-        or "loss.shared_head" in k
+        if k.startswith("shared_feature_extractor.") or k.startswith("shared_head.")
     ]    
     if not shared_keys:
         return None
@@ -293,13 +292,14 @@ def restore_shared_features(
         var_list=shared_keys,
         map_location="cpu",
     )
+    # `strict=False` → Load only what exists
     model.load_state_dict(loaded_vars, strict=False)
 
     return model
 
 
 # ------------------------------------------------------------
-#   Main Entrance
+#   Meta Train Entrance
 # ------------------------------------------------------------
 
 
@@ -352,11 +352,13 @@ def train(
     state = create_model(**args)
 
     restored = common.init_training(state)
-    init_op = restore_shared_features(
-        model=state.model,
-    )
-    if not restored and init_op is not None:
-        sess.run(init_op)
+    if not restored:
+        model = restore_shared_features(
+            model=state.model,
+        )
+        if model:
+            state.model = model
+
     common.train(
         train_config,
         layerwise_model_config,

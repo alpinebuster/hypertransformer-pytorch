@@ -254,9 +254,14 @@ flags.DEFINE_enum(
     "Shared feature extractor model.",
 )
 flags.DEFINE_integer(
+    "shared_input_dim",
+    3,
+    "Default number of input channels in the shared feature extractor network.",
+)
+flags.DEFINE_integer(
     "shared_features_dim",
     32,
-    "Default number of channels in the shared feature extractor network.",
+    "Default number of output channels in the shared feature extractor network.",
 )
 flags.DEFINE_bool(
     "separate_evaluation_bn_vars",

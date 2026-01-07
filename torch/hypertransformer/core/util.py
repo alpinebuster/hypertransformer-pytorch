@@ -4,7 +4,7 @@ import functools
 import glob
 import math
 import os
-from typing import Callable, Optional, Iterable, Union, Any
+from typing import TYPE_CHECKING, Callable, Optional, Iterable, Union
 
 from absl import logging
 import torch
@@ -12,9 +12,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 
-from hypertransformer.core import transformer
+if TYPE_CHECKING:
+    from hypertransformer.core import transformer
 
-TransformerParamsFn = Callable[[int], transformer.TransformerParams]
+TransformerParamsFn = Callable[[int], "transformer.TransformerParams"]
 
 
 # ------------------------------------------------------------
@@ -359,7 +360,7 @@ def _extract_checkpoint_step(s: str) -> int:
 
 def _find_latest_checkpoint(ckpt_dir: str) -> Optional[str]:
     """Find latest checkpoint in directory by step number."""
-    all_checkpoints = glob.glob(os.path.join(ckpt_dir, "*.pt"))
+    all_checkpoints = glob.glob(os.path.join(ckpt_dir, "*-[0-9]*.pt"))
     if not all_checkpoints:
         return None
 
@@ -420,6 +421,7 @@ def load_variables(
     if var_list is None:
         return dict(state_dict)
 
+    # Only load the specified variable
     return {
         name: state_dict[name]
         for name in var_list
@@ -570,6 +572,7 @@ def same_pad_2d(
 
     return F.pad(x, (pad_left, pad_right, pad_top, pad_bottom))
 
+
 def print_gpu_detailed_info() -> None:
     logging.info("========== GPU / CUDA INFO ==========")
     logging.info(f"CUDA_VISIBLE_DEVICES: {os.environ.get("CUDA_VISIBLE_DEVICES", "<ALL>")}")
@@ -582,7 +585,7 @@ def print_gpu_detailed_info() -> None:
         logging.info("====================================")
         return
 
-    logging.info("Visible GPU Count:", torch.cuda.device_count())
+    logging.info(f"Visible GPU Count: {torch.cuda.device_count()}")
 
     for i in range(torch.cuda.device_count()):
         props = torch.cuda.get_device_properties(i)

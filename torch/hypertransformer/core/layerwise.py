@@ -102,10 +102,12 @@ def remove_some_samples(
 # ------------------------------------------------------------
 
 
-class _Generator:
+class _Generator(nn.Module):
     """Generic generator."""
 
     def __init__(self, name: str, model_config: "LayerwiseModelConfig"):
+        super().__init__()
+
         self.name = name
         self.model_config = model_config
         self.num_weight_blocks: Optional[int] = None
@@ -153,8 +155,12 @@ class _Generator:
             # shared_features   -> Image Feature Extractor
             features = self.feature_extractor(input_tensor)
             if enable_fe_dropout and self.model_config.fe_dropout > 0.0:
-                dropout = nn.Dropout(p=self.model_config.fe_dropout)
-                features = dropout(features)
+                # NOTE: always True
+                features = F.dropout(
+                    features,
+                    p=self.model_config.fe_dropout,
+                    training=True,
+                )
         else:
             features = None
 
@@ -469,6 +475,7 @@ class BaseCNNLayer(nn.Module):
         self,
         inputs: torch.Tensor,
         selected_weights: dict[str, Optional[torch.Tensor]] = {},
+        training: bool = True,
         evaluation: bool = False,
         separate_bn_variables: bool = False,
     ) -> torch.Tensor:
@@ -566,7 +573,7 @@ class BaseCNNLayer(nn.Module):
         input_tensor: torch.Tensor,
         weight_blocks: Optional[list[torch.Tensor]],
         *args,
-        evaluation: bool = False,
+        evaluation: bool = False, # Evaluation of new task
         separate_bn_variables: bool = False,
         **kwargs,
     ):
@@ -586,6 +593,7 @@ class BaseCNNLayer(nn.Module):
         """
         assert self.initialized, "Layer must be initialized with `self.create()` before apply"
 
+        # Make sure it does not accumulate across forwards
         self._extra_losses.clear()
         # 'kernel', 'bias', 'gamma', 'beta'
         selected_weights: dict[str, Optional[torch.Tensor]] = {}
@@ -606,28 +614,6 @@ class BaseCNNLayer(nn.Module):
             *args,
             **kwargs,
         )
-
-
-def collect_extra_losses(model: nn.Module) -> Optional[torch.Tensor]:
-    total: Optional[torch.Tensor] = None
-    for m in model.modules():
-        if not hasattr(m, "_extra_losses"):
-            continue
-
-        extra_losses = m._extra_losses
-
-        if not isinstance(extra_losses, list):
-            continue
-
-        if len(extra_losses) == 0:
-            continue
-
-        # Clearly tell the type checker that this is a `torch.Tensor` list
-        s = torch.stack(extra_losses, dim=0).sum()
-
-        total = s if total is None else total + s
-        extra_losses.clear()
-    return total
 
 
 class ConvLayer(BaseCNNLayer):
@@ -733,7 +719,7 @@ class ConvLayer(BaseCNNLayer):
 
     def _setup(self, inputs: torch.Tensor) -> None:
         """Input-specific setup."""
-        # inputs -> [NCHW]
+        # inputs -> [BCHW]
         self.input_dim = int(inputs.shape[1])
         if self.num_features is None:
             self.num_features = max(self.output_dim, self.input_dim)
@@ -754,7 +740,9 @@ class ConvLayer(BaseCNNLayer):
         in_ch = inputs.shape[1]
         out_ch = self.output_dim
         self.default_kernel = nn.Parameter(torch.empty(out_ch, in_ch, self.kernel_size, self.kernel_size))
-        nn.init.kaiming_normal_(self.default_kernel, mode="fan_out", nonlinearity="relu")
+        # fan_in: Maintain the variance stability of the activation value in the forward propagation
+        # fan_out: Maintain the variance stability of the gradient in the backpropagation
+        nn.init.kaiming_normal_(self.default_kernel, mode="fan_in", nonlinearity="relu")
         self.default_bias = nn.Parameter(torch.zeros(out_ch))
         if self.add_trainable_weights:
             self.var_weights["kernel"] = nn.Parameter(torch.zeros_like(self.default_kernel))
@@ -790,6 +778,7 @@ class ConvLayer(BaseCNNLayer):
         self,
         inputs: torch.Tensor,
         selected_weights: dict[str, Optional[torch.Tensor]] = {},
+        training: bool = True,
         evaluation: bool = False,
         separate_bn_variables: bool = False,
     ) -> torch.Tensor:
@@ -807,7 +796,7 @@ class ConvLayer(BaseCNNLayer):
                 kernel = self.default_kernel
             else:
                 kernel = nn.Parameter(torch.empty(self.output_dim, inputs.shape[1], self.kernel_size, self.kernel_size))
-                nn.init.kaiming_normal_(kernel, mode="fan_out", nonlinearity="relu")
+                nn.init.kaiming_normal_(kernel, mode="fan_in", nonlinearity="relu")
         if bias is None:
             if hasattr(self, "default_bias"):
                 bias = self.default_bias
@@ -826,9 +815,8 @@ class ConvLayer(BaseCNNLayer):
         x = F.conv2d(
             inputs,
             weight=kernel,
-            bias=bias if self.generate_bias else None,
+            bias=bias,
             stride=self.stride,
-            padding=self.padding,
         )
         if not self.act_after_bn:
             x = self.act_fn(x)
@@ -840,8 +828,8 @@ class ConvLayer(BaseCNNLayer):
         #
         # ------------------------------------------------------------------
         # In a standard CNN:
-        #   - During training, training=True  -> use batch mean/variance
-        #   - During testing,  training=False -> use global mean/variance (moving averages) from training
+        #   - During training, training is True  -> use batch mean/variance
+        #   - During testing,  training is False -> use global mean/variance (moving averages) from training
         #   Assumes train/test data come from the same distribution.
         #
         # In this hypertransformer + few-shot setting:
@@ -849,9 +837,11 @@ class ConvLayer(BaseCNNLayer):
         #   - CNN weights are generated per task, not fixed
         #   - There is no stable global feature distribution
         #
-        # Therefore, BatchNorm must always use batch statistics (training=True)
+        # Therefore, BatchNorm must always use batch statistics (training => True)
         # to normalize features based on the current task's data.
         """
+        # This is aiming to make pytest happy, we already initialized it in `_setup` func
+        # So this DDP safe
         gamma = None
         beta = None
         bn_layer = None
@@ -859,7 +849,7 @@ class ConvLayer(BaseCNNLayer):
             if hasattr(self, "bn_eval"):
                 bn_layer = self.bn_eval
             else:
-                bn_layer = nn.BatchNorm2d(self.output_dim, affine=self.generate_bn)
+                bn_layer = nn.BatchNorm2d(self.output_dim, affine=not self.generate_bn)
             if self.add_trainable_weights:
                 gamma = selected_weights.get("gamma_eval", None)
                 beta = selected_weights.get("beta_eval", None)
@@ -867,20 +857,22 @@ class ConvLayer(BaseCNNLayer):
             if hasattr(self, "bn"):
                 bn_layer = self.bn
             else:
-                bn_layer = nn.BatchNorm2d(self.output_dim, affine=self.generate_bn)
+                bn_layer = nn.BatchNorm2d(self.output_dim, affine=not self.generate_bn)
             if self.add_trainable_weights:
-                gamma = self.var_weights["gamma"]
-                beta = self.var_weights["beta"]
+                gamma = selected_weights.get("gamma", None)
+                beta = selected_weights.get("beta", None)
+
         if not self.generate_bn:
             x = bn_layer(x)
         elif self.add_trainable_weights:
+            # NOTE: always True
             x = F.batch_norm(
                 x,
                 bn_layer.running_mean,
                 bn_layer.running_var,
                 weight=gamma,
                 bias=beta,
-                training=self.training,
+                training=True,
                 eps=bn_layer.eps,
                 # `nn.BatchNorm2d(... momentum=None)` allows `None` in the module,
                 # indicating the use of default values, which is `0.1`
@@ -972,8 +964,6 @@ class LogitsLayer(BaseCNNLayer):
             var_reg_weight=0.0,
         )
 
-        self.dropout = nn.Dropout(p=model_config.cnn_dropout_rate)
-
         if num_features is None:
             num_features = model_config.num_features
         self.num_features = num_features
@@ -984,7 +974,7 @@ class LogitsLayer(BaseCNNLayer):
 
     def _setup(self, inputs: torch.Tensor) -> None:
         """Input-specific setup."""
-        # inputs -> [NCHW]
+        # inputs -> [BCHW]
         self.input_dim = int(inputs.shape[1])
 
         if self.num_features is None:
@@ -1015,6 +1005,7 @@ class LogitsLayer(BaseCNNLayer):
         self,
         inputs: torch.Tensor,
         selected_weights: dict[str, Optional[torch.Tensor]] = {},
+        training: bool = True,
         evaluation: bool = False,
         separate_bn_variables: bool = False,
     ) -> torch.Tensor:
@@ -1023,7 +1014,11 @@ class LogitsLayer(BaseCNNLayer):
         inputs = self.gap(inputs)
         # [batch, channels, 1, 1] → [batch, channels]
         inputs = inputs.flatten(start_dim=1)
-        dropout_tensor = self.dropout(inputs)
+        dropout_tensor = F.dropout(
+            inputs,
+            p=self.model_config.cnn_dropout_rate,
+            training=training,
+        )
         # [batch, channels] → [batch, num_labels]
         return self.fc(dropout_tensor)
 
@@ -1071,6 +1066,7 @@ class FlattenLogitsLayer(LogitsLayer):
         if self.model_config.logits_feature_extractor in ["", "default", "mix"]:
             feature_extractor_class = functools.partial(
                 feature_extractors.SimpleConvFeatureExtractor,
+                in_channels=inputs.shape[1],
                 feature_layers=1,
                 feature_dim=self.num_features,
                 input_size=int(inputs.shape[1]),
@@ -1104,12 +1100,17 @@ class FlattenLogitsLayer(LogitsLayer):
         self,
         inputs: torch.Tensor,
         selected_weights: dict[str, Optional[torch.Tensor]] = {},
+        training: bool = True,
         evaluation: bool = False,
         separate_bn_variables: bool = False,
     ) -> torch.Tensor:
         # [batch, C, H, W] → [batch, C*H*W]
         inputs = inputs.flatten(start_dim=1)
-        dropout_tensor = self.dropout(inputs)
+        dropout_tensor = F.dropout(
+            inputs,
+            p=self.model_config.cnn_dropout_rate,
+            training=training,
+        )
         # [batch, C*H*W] → [batch, num_labels]
         return self.fc(dropout_tensor)
 
@@ -1122,7 +1123,19 @@ class FlattenLogitsLayer(LogitsLayer):
 class LayerwiseModel(nn.Module):
     """Model specification including layer builders.
 
-    `list(model.layers[i].parameters())`
+    Usage:
+       1) `list(model.layers[i].parameters())`
+       2) Stochastic structure:
+
+          Input tensor
+                ↓
+          Activation & Shared Image FE `dropout` (always on)
+                ↓
+          Transformers
+                ↓
+          CNN conv + `BN` (always on -> per task batch statistics, NO stable global feature distribution)
+                ↓
+          Logits `dropout` (meta-train: off, evaluate new task: on)
     """
 
     def __init__(
@@ -1133,7 +1146,7 @@ class LayerwiseModel(nn.Module):
     ):
         super().__init__()
 
-        self.layers = layers
+        self.layers = nn.ModuleList(layers)
         self.shared_feature_extractor = feature_extractors.get_shared_feature_extractor(
             model_config
         )
@@ -1161,6 +1174,12 @@ class LayerwiseModel(nn.Module):
             )
         else:
             self.shared_head = None
+
+        self.shared_head_outputs: dict[str, Optional[torch.Tensor]] = {}
+        self.layer_outputs: dict[
+            str,
+            tuple[Optional[torch.Tensor], Optional[torch.Tensor]],
+        ] = {}
 
     def _train(
         self,
@@ -1207,8 +1226,12 @@ class LayerwiseModel(nn.Module):
         if self.shared_feature_extractor is not None:
             shared_features = self.shared_feature_extractor(inputs)
             if enable_fe_dropout and self.shared_fe_dropout > 0.0:
-                dropout = nn.Dropout(p=self.shared_fe_dropout)
-                shared_features = dropout(shared_features)
+                # NOTE: always True
+                shared_features = F.dropout(
+                    shared_features,
+                    p=self.shared_fe_dropout,
+                    training=True,
+                )
 
         if only_shared_feature:
             return GeneratedWeights(
@@ -1240,6 +1263,9 @@ class LayerwiseModel(nn.Module):
             )
 
         for layer, generate_weights in zip(self.layers, generate_weights_per_layers):
+            # Just to make Pylance 100% happy!!!
+            layer = cast(BaseCNNLayer, layer)
+
             # cnn_builder
             weight_blocks = layer.create(
                 input_tensor=inputs,
@@ -1270,7 +1296,11 @@ class LayerwiseModel(nn.Module):
                 all_head_blocks[layer.name] = head_blocks
 
         self.shared_head_outputs = {}
-        if self.shared_head is not None and self.dataset.transformer_real_classes is not None:
+        if (
+            self.shared_head is not None and
+            self.dataset.transformer_real_classes is not None and
+            shared_features is not None
+        ):
             shared_head_loss, shared_head_acc = self.shared_head(
                 shared_features,
                 self.dataset.transformer_real_classes,
@@ -1291,18 +1321,22 @@ class LayerwiseModel(nn.Module):
         self,
         inputs: torch.Tensor,
         weight_blocks: Optional["GeneratedWeights"] = None,
+        training: bool = True,
     ) -> torch.Tensor:
         """Passes input tensors (Query Set) through a built CNN model."""
         if weight_blocks is None:
             raise ValueError("weight_blocks must be provided")
 
         self.layer_outputs = {}
-
         for layer, layer_blocks in zip(self.layers, weight_blocks.weight_blocks):
+            # Just to make Pylance 100% happy!!!
+            layer = cast(BaseCNNLayer, layer)
+
             # cnn
             inputs = layer.apply(
                 inputs,
                 weight_blocks=layer_blocks,
+                training=training,
                 evaluation=True,
                 separate_bn_variables=self.separate_bn_variables,
             )
@@ -1313,6 +1347,7 @@ class LayerwiseModel(nn.Module):
                 head = layer.head.apply(
                     inputs,
                     weight_blocks=weight_blocks.head_weight_blocks[layer.name],
+                    training=training,
                     evaluation=True,
                     separate_bn_variables=self.separate_bn_variables,
                 )
@@ -1329,19 +1364,48 @@ class LayerwiseModel(nn.Module):
         mask_random_samples: bool = False,
         enable_fe_dropout: bool = False,
         only_shared_feature: bool = False,
-        training: bool = True, # Train or Test
-    ) -> Optional[torch.Tensor]:
+        deterministic_inference: bool = True, # How to evaluate generated CNN
+    ) -> Union[Optional[torch.Tensor], Optional["GeneratedWeights"]]:
+        """
+        deterministic_inference -> Whether to run CNN in deterministic reasoning mode (with randomness such as dropout, bn turned off)
+           1) True  -> Observe the optimization process consistent with the training behavior,
+              making sure that the forward calculation method used when calculating accuracy/loss
+              should be the same as the one you will actually use to calculate gradients and
+              update parameters later.
+           2) False -> Given the generated weights of the CNN, how is the reasoning ability
+              of this CNN?
+        """
         weight_blocks: Optional["GeneratedWeights"] = self._train(
             transformer_images,
             transformer_labels,
             mask,
             mask_random_samples=mask_random_samples
                 if mask_random_samples
-                else training or only_shared_feature,
+                else deterministic_inference or only_shared_feature,
             enable_fe_dropout=enable_fe_dropout
                 if enable_fe_dropout
-                else training or only_shared_feature,
+                else deterministic_inference or only_shared_feature,
             only_shared_feature=only_shared_feature,
         )
         if not only_shared_feature:
-            return self._evaluate(cnn_images, weight_blocks)
+            return self._evaluate(cnn_images, weight_blocks, training=deterministic_inference)
+        else:
+            return weight_blocks
+
+    def regularization_loss(self) -> torch.Tensor:
+        reg_losses = []
+
+        for layer in self.layers:
+            # Just to make Pylance 100% happy!!!
+            layer = cast(BaseCNNLayer, layer)
+
+            if hasattr(layer, "_extra_losses") and layer._extra_losses:
+                reg_losses.extend(layer._extra_losses)
+            if hasattr(layer, "head") and layer.head is not None:
+                if layer.head._extra_losses:
+                    reg_losses.extend(layer.head._extra_losses)
+
+        if not reg_losses:
+            return torch.zeros((), device=next(self.parameters()).device)
+
+        return torch.stack(reg_losses).sum()

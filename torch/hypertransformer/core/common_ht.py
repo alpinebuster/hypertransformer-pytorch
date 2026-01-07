@@ -142,6 +142,7 @@ class LayerwiseModelConfig(ModelConfig):
     num_features: Optional[int] = None
     nonlinear_feature: bool = False
     shared_feature_extractor: str = ""
+    shared_input_dim: int = 3
     shared_features_dim: int = 32
     shared_feature_extractor_padding: str = "valid"
     label_smoothing: float = 0.

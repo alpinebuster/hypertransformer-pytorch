@@ -4,6 +4,7 @@ import functools
 
 from typing import Optional
 import typing_extensions
+from absl import logging
 
 import tensorflow.compat.v1 as tf # pyright: ignore[reportMissingImports] # pylint:disable=import-error
 
@@ -76,6 +77,12 @@ class SimpleConvFeatureExtractor(FeatureExtractor):
 
             for conv in self.convs:
                 if int(tensor.shape[1]) < self.kernel_size:
+                    logging.info(
+                        f"{self.__class__.__name__} cannot apply Conv2d at layer {len(outputs)+1}: "
+                        f"spatial size {(tensor.shape[-2], tensor.shape[-1])} "
+                        f"is smaller than kernel_size={self.kernel_size}. "
+                        f"Check input_size, kernel_size, stride, or padding."
+                    )
                     break
 
                 tensor = conv(tensor)
