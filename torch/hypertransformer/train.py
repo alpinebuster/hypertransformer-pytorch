@@ -227,6 +227,17 @@ def create_layerwise_model(
         model_config=model_config,
         dataset=dataset,
     )
+    # Run `setup()` to create all layers / transformer / BN, etc.
+    # Use `torch.no_grad()` to avoid constructing unnecessary gradient graphs
+    with torch.no_grad():
+        model.setup(
+            dataset.transformer_images,
+            dataset.transformer_labels,
+            mask=dataset.transformer_masks,
+            mask_random_samples=True,
+            enable_fe_dropout=True,
+            only_shared_feature=False,
+        )
     optimizer, scheduler = _make_optimizer(optim_config, model)
 
     return common.TrainState(
@@ -251,6 +262,14 @@ def create_shared_feature_model(
         model_config.cnn_model_name,
         model_config=model_config,
         dataset=dataset,
+    )
+    model.setup(
+        dataset.transformer_images,
+        dataset.transformer_labels,
+        dataset.transformer_masks,
+        mask_random_samples=True,
+        enable_fe_dropout=True,
+        only_shared_feature=True,
     )
     optimizer, scheduler = _make_optimizer(optim_config, model)
 

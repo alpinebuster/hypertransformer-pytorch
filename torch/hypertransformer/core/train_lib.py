@@ -6,7 +6,7 @@ import os
 import random
 import glob
 
-from typing import Callable, Optional, Tuple
+from typing import Optional
 
 from absl import logging
 import numpy as np
