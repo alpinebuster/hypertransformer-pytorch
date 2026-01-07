@@ -194,6 +194,13 @@ class DatasetSamples:
     real_class_min: Optional[int] = None
     real_class_max: Optional[int] = None
 
+    def to(self, device: torch.device):
+        # `vars(self)` -> `self.__dict__`
+        for name, value in vars(self).items():
+            if torch.is_tensor(value):
+                setattr(self, name, value.to(device))
+        return self
+
 
 def get_cnn_activation(
     config: LayerwiseModelConfig

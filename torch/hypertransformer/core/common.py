@@ -5,7 +5,7 @@ import dataclasses
 import os
 import time
 
-from typing import TYPE_CHECKING, Any, Callable, Optional, \
+from typing import TYPE_CHECKING, Callable, Optional, \
     TypedDict
 from typing_extensions import Annotated
 
@@ -81,7 +81,9 @@ class TrainState:
             f"{self.checkpoint_suffix}-{self.global_step}.pt"
         )
         torch.save({
-            "model": self.model.state_dict(),
+            # Machines without a GPU can still use `torch.load` to load it
+            # No reliance on CUDA version
+            "model": {k: v.detach().cpu() for k, v in self.model.state_dict().items()},
             "optimizer": self.optimizer.state_dict(),
             "global_step": self.global_step,
         }, path)
@@ -238,7 +240,12 @@ def train(
     assert state.summary_writer is not None, "Must run `common.init_training(state)` before start training!"
 
     # Get the device where the model is currently located by taking the first `torch.nn.Parameter`
-    device = next(state.model.parameters()).device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    state.model.to(device)
+    for name, param in state.model.named_parameters():
+        print(f"{name}, {param.device}")
+    state.model.dataset.to(device)
+
     start_step = state.global_step
     starting_time = time.time()
 
@@ -254,20 +261,13 @@ def train(
         train_batch = batch_provider[0]()
         test_batch = batch_provider[1]()
 
-        train_support_images = train_batch.transformer_images.to(device)
-        train_support_labels = train_batch.transformer_labels.to(device)
-        train_query_images = train_batch.cnn_images.to(device)
-        train_query_labels = train_batch.cnn_labels.to(device)
-
-        test_support_images = test_batch.transformer_images.to(device)
-        test_support_labels = test_batch.transformer_labels.to(device)
-        test_query_images = test_batch.cnn_images.to(device)
-        test_query_labels = test_batch.cnn_labels.to(device)
+        train_batch.to(device)
+        test_batch.to(device)
 
         if common_flags.PRETRAIN_SHARED_FEATURE.value:
             _ = state.model(
-                train_support_images,
-                train_support_labels,
+                train_batch.transformer_images,
+                train_batch.transformer_labels,
                 mask=train_batch.transformer_masks,
                 mask_random_samples=True,
                 enable_fe_dropout=True,
@@ -281,9 +281,9 @@ def train(
             state.small_summaries["accuracy/shared_head_accuracy"] = shared_head_acc.item()
         else:
             predictions = state.model(
-                train_support_images,
-                train_support_labels,
-                train_query_images,
+                train_batch.transformer_images,
+                train_batch.transformer_labels,
+                train_batch.cnn_images,
                 mask=train_batch.transformer_masks,
                 mask_random_samples=True,
                 enable_fe_dropout=True,
@@ -297,20 +297,20 @@ def train(
                 heads = [output[1] for output in outputs if output[1] is not None]
 
             test_predictions = state.model(
-                test_support_images,
-                test_support_labels,
-                test_query_images,
+                test_batch.transformer_images,
+                test_batch.transformer_labels,
+                test_batch.cnn_images,
                 mask=test_batch.transformer_masks,
                 deterministic_inference=False,
             )
 
-            labels = train_query_labels.long()
+            labels = train_batch.cnn_labels.long()
             # Train accuracy
             pred_labels = torch.argmax(predictions, dim=-1) # (B,)
-            num_cnn_samples: int = train_query_labels.numel()
+            num_cnn_samples: int = train_batch.cnn_labels.numel()
 
             def _acc(pred):
-                accuracy = (pred == train_query_labels).float().sum()
+                accuracy = (pred == train_batch.cnn_labels).float().sum()
                 return accuracy / num_cnn_samples
 
             accuracy = _acc(pred_labels)
@@ -321,7 +321,7 @@ def train(
             # Test accuracy
             test_pred_labels = torch.argmax(test_predictions, dim=-1)
             test_accuracy = (
-                (test_pred_labels == test_query_labels)
+                (test_pred_labels == test_batch.cnn_labels)
                 .float()
                 .sum()
                 / num_cnn_samples
