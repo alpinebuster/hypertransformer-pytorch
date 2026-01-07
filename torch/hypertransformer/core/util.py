@@ -481,20 +481,27 @@ class MultiFileWriter:
         global_step: Optional[int] = 0,
         writer_name: Optional[str] = "train",
     ):
-        tag = self._normalize_tag(tag)
-        self._get_writer(writer_name).add_scalar(tag, value, global_step)
+        self._get_writer(writer_name).add_scalar(
+            self._normalize_tag(tag),
+            value,
+            global_step,
+        )
 
     def add_scalars(
         self,
         scalars: dict[str, float],
         global_step: Optional[int] = 0,
+        writer_name: Optional[str] = "train",
     ):
         """
         Write multiple scalars to different sub-writers.
         """
-        for writer_name, value in scalars.items():
-            self._get_writer(writer_name).add_scalar(
-                self._normalize_tag(writer_name), value, global_step
+        writer = self._get_writer(writer_name)
+        for tag, value in scalars.items():
+            writer.add_scalar(
+                self._normalize_tag(tag),
+                value,
+                global_step,
             )
 
     def close(self):
