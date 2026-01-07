@@ -28,7 +28,7 @@ STRIDE = flags.DEFINE_integer("stride", 2, "Stride of the conv layers.")
 flags.DEFINE_integer("image_size", 28, "Image size.")
 flags.DEFINE_integer("num_sample_repeats", 1, "Number of repeats for each task.")
 flags.DEFINE_integer(
-    "steps_between_saves", 50000, "Number of steps between model saves."
+    "steps_between_saves", 1000, "Number of steps between model saves."
 )
 flags.DEFINE_string("cnn_model_name", "3-layer", "CNN model to train.")
 flags.DEFINE_integer("embedding_dim", 8, "Dimensionality of the embedding.")

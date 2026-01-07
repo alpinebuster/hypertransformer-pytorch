@@ -52,7 +52,7 @@ class TrainConfig:
     """Training configuration."""
 
     train_steps: int = 10000
-    steps_between_saves: int = 5000
+    steps_between_saves: int = 1000
     small_summaries_every: int = 100
     large_summaries_every: int = 500
 
@@ -243,8 +243,8 @@ def train(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     state.model.to(device)
     for name, param in state.model.named_parameters():
-        print(f"{name}, device: {param.device}")
-        print(f"{name}, grad: {param.grad is None}")
+        logging.info(f"{name}, device: {param.device}")
+        logging.info(f"{name}, grad: {param.grad is None}")
     state.model.dataset.to(device)
 
     start_step = state.global_step

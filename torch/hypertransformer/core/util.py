@@ -601,7 +601,7 @@ def print_gpu_detailed_info() -> None:
         allocated = torch.cuda.memory_allocated(i) / 1024**3
         reserved = torch.cuda.memory_reserved(i) / 1024**3
 
-        logging.info(f"\n--- GPU {i} ---")
+        logging.info(f"--- GPU {i} ---")
         logging.info(f"Name: {props.name}")
         logging.info(f"Compute Capability: {props.major}.{props.minor}")
         logging.info(f"Total Memory: {total_mem:.2f} GB")
