@@ -86,7 +86,10 @@ def run_evaluation(
            detect ckpt-2000 → evaluate
            detect ckpt-3000 → evaluate
     """
-    summary_writer = util.MultiFileWriter(os.path.join(FLAGS.train_log_dir, SUMMARY_SUBFOLDER))
+    ss_dir = os.path.join(FLAGS.train_log_dir, SUMMARY_SUBFOLDER)
+    os.makedirs(ss_dir, exist_ok=True)
+    summary_writer = util.MultiFileWriter(ss_dir)
+
     global_step = 0
     last_checkpoint = None
 
@@ -117,6 +120,7 @@ def run_evaluation(
         add_scalar = functools.partial(
             summary_writer.add_scalar,
             global_step=global_step,
+            writer_name=SUMMARY_SUBFOLDER,
         )
         for name, info in dataset_info.items():
             batch_provider, custom_labels = info
