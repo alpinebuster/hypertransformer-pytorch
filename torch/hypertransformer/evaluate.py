@@ -94,8 +94,7 @@ def run_evaluation(
     last_checkpoint = None
 
     for name, param in model.named_parameters():
-        logging.info(f"{name}, device: {param.device}")
-        logging.info(f"{name}, grad: {param.grad is None}")
+        logging.info(f"{name}, device: {param.device}, grad: {param.grad is None}")
 
     while True:
         # Continuously monitor the training directory. 
