@@ -186,10 +186,10 @@ class DatasetSamples:
 
     transformer_images: torch.Tensor # Support set
     transformer_labels: torch.Tensor
-    transformer_real_classes: Optional[torch.Tensor]
     cnn_images: torch.Tensor # Query set
     cnn_labels: torch.Tensor
-    cnn_real_classes: Optional[torch.Tensor]
+    transformer_real_classes: Optional[torch.Tensor] = None
+    cnn_real_classes: Optional[torch.Tensor] = None
     transformer_masks: Optional[torch.Tensor] = None
     real_class_min: Optional[int] = None
     real_class_max: Optional[int] = None

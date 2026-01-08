@@ -95,7 +95,7 @@ class TrainState:
 
         data = torch.load(ckpt_path, map_location="cpu")
 
-        self.model.load_state_dict(data["model"])
+        self.model.load_state_dict(data["model"], strict=False)
         self.optimizer.load_state_dict(data["optimizer"])
         self.global_step = int(data.get("global_step", 0))
 

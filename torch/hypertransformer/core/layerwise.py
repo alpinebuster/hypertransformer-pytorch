@@ -1392,10 +1392,10 @@ class LayerwiseModel(nn.Module):
             mask,
             mask_random_samples=mask_random_samples
                 if mask_random_samples
-                else deterministic_inference or only_shared_feature,
+                else only_shared_feature,
             enable_fe_dropout=enable_fe_dropout
                 if enable_fe_dropout
-                else deterministic_inference or only_shared_feature,
+                else only_shared_feature,
             only_shared_feature=only_shared_feature,
         )
         if not only_shared_feature:

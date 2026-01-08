@@ -263,14 +263,15 @@ def create_shared_feature_model(
         model_config=model_config,
         dataset=dataset,
     )
-    model.setup(
-        dataset.transformer_images,
-        dataset.transformer_labels,
-        dataset.transformer_masks,
-        mask_random_samples=True,
-        enable_fe_dropout=True,
-        only_shared_feature=True,
-    )
+    with torch.no_grad():
+        model.setup(
+            dataset.transformer_images,
+            dataset.transformer_labels,
+            dataset.transformer_masks,
+            mask_random_samples=True,
+            enable_fe_dropout=True,
+            only_shared_feature=True,
+        )
     optimizer, scheduler = _make_optimizer(optim_config, model)
 
     return common.TrainState(
