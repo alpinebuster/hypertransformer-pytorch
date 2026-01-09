@@ -221,7 +221,7 @@ def create_layerwise_model(
     optim_config: common.OptimizerConfig,
 ):
     """Creates a hierarchical Transformer-CNN model."""
-    logging.info(f"[DDP] global_rank={dist.get_rank()} >>> Building the model...")
+    logging.info(f"{util.get_ddp_msg()}Building the model...")
 
     model = layerwise.build_model(
         model_config.cnn_model_name,
@@ -257,7 +257,7 @@ def create_shared_feature_model(
     optim_config: common.OptimizerConfig,
 ):
     """Creates an image feature extractor model for pre-training."""
-    logging.info(f"[DDP] global_rank={dist.get_rank()} >>> Building the model...")
+    logging.info(f"{util.get_ddp_msg()}Building the model...")
 
     model = layerwise.build_model(
         model_config.cnn_model_name,
@@ -333,7 +333,7 @@ def train(
 ):
     """Main function training the model."""
     model_state = train_lib.ModelState()
-    logging.info(f"[DDP] global_rank={dist.get_rank()} >>> Creating the dataset...")
+    logging.info(f"{util.get_ddp_msg()}Creating the dataset...")
 
     # ALL data
     numpy_arr = train_lib.make_numpy_array(
@@ -369,7 +369,7 @@ def train(
             model_config=layerwise_model_config,
         )
 
-    logging.info(f"[DDP] global_rank={dist.get_rank()} >>> Training...")
+    logging.info(f"{util.get_ddp_msg()}Training...")
     state = create_model(**args)
 
     restored = common.init_training(state)
@@ -393,7 +393,9 @@ def main(argv):
     if len(argv) > 1:
         del argv
 
-    if dist.get_rank() == 0:
+    if FLAGS.ddp:
+        util.setup_ddp()
+    if FLAGS.ddp and dist.get_rank() == 0:
         logging.info(f"FLAGS: {FLAGS.flag_values_dict()}")
 
     gpus: str = FLAGS.gpus

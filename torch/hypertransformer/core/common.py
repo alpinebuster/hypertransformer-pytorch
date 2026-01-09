@@ -5,7 +5,7 @@ import dataclasses
 import os
 import time
 
-from typing import TYPE_CHECKING, Callable, Optional, \
+from typing import cast, TYPE_CHECKING, Callable, Optional, \
     TypedDict, Union
 from typing_extensions import Annotated
 
@@ -76,7 +76,7 @@ class TrainState:
     large_summaries: dict[str, torch.Tensor] = field(default_factory=dict)
 
     def save(self):
-        if dist.get_rank() != 0:
+        if FLAGS.ddp and dist.get_rank() != 0:
             return
 
         logging.info(f"Saving checkpoint at step {self.global_step}")
@@ -85,11 +85,15 @@ class TrainState:
             self.checkpoint_dir,
             f"{self.checkpoint_suffix}-{self.global_step}.pt"
         )
-        assert isinstance(self.model, DDP)
+        unwrapped_model = util.unwrap_model(self.model)
+        unwrapped_model = cast(LayerwiseModel, unwrapped_model)
         torch.save({
             # Machines without a GPU can still use `torch.load` to load it
             # No reliance on CUDA version
-            "model": {k: v.detach().cpu() for k, v in self.model.module.state_dict().items()},
+            "model": {
+                k: v.detach().cpu()
+                for k, v in unwrapped_model.state_dict().items()
+            },
             "optimizer": self.optimizer.state_dict(),
             "global_step": self.global_step,
         }, path)
@@ -169,7 +173,7 @@ def _make_warmup_loss(
     num_heads = len(loss_heads)
     # The warmup time length corresponding to each head
     steps_per_stage = FLAGS.warmup_steps / num_heads
-    loss = 0.
+    loss = torch.tensor(0., device=loss_prediction.device)
     weights = []
 
     # The following code ends up returning just the true model head loss
@@ -246,22 +250,27 @@ def train(
     """
     assert state.summary_writer is not None, "Must run `common.init_training(state)` before start training!"
 
-    local_rank = util.setup_ddp()
-    global_rank = dist.get_rank()
-    device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
+    local_rank = None
+    global_rank = None
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if FLAGS.ddp:
+        local_rank = int(os.environ["LOCAL_RANK"])
+        global_rank = dist.get_rank()
+        device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
     state.model = state.model.to(device)
-    if global_rank == 0:
+    if not FLAGS.ddp or global_rank == 0:
         for name, param in state.model.named_parameters():
             logging.info(f"{name}, device: {param.device}, grad: {param.grad is None}")
     state.model.dataset.to(device)
 
     # DDP
-    state.model = DDP(
-        state.model,
-        device_ids=[local_rank],
-        output_device=local_rank,
-        find_unused_parameters=False, # Speed up
-    )
+    if FLAGS.ddp:
+        state.model = DDP(
+            state.model,
+            device_ids=[local_rank],
+            output_device=local_rank,
+            find_unused_parameters=False, # Speed up
+        )
 
     start_step = state.global_step
     starting_time = time.time()
@@ -286,6 +295,8 @@ def train(
         train_batch.to(device)
         test_batch.to(device)
 
+        unwrapped_model = util.unwrap_model(state.model)
+        unwrapped_model = cast(LayerwiseModel, unwrapped_model)
         if common_flags.PRETRAIN_SHARED_FEATURE.value:
             _ = state.model(
                 train_batch.transformer_images,
@@ -295,7 +306,7 @@ def train(
                 enable_fe_dropout=True,
                 only_shared_feature=True,
             )
-            shared_head_loss, shared_head_acc = state.model.module.shared_head_outputs.values()
+            shared_head_loss, shared_head_acc = unwrapped_model.shared_head_outputs.values()
             assert shared_head_loss is not None and shared_head_acc is not None
             state.model_state.loss = shared_head_loss
 
@@ -314,7 +325,7 @@ def train(
 
             heads = []
             if model_config.train_heads:
-                outputs = state.model.module.layer_outputs.values()
+                outputs = unwrapped_model.layer_outputs.values()
                 # layer_outputs[layer.name] => (inputs, head)
                 heads = [output[1] for output in outputs if output[1] is not None]
 
@@ -359,12 +370,12 @@ def train(
             assert state.model_state.loss is not None
             add_scalar_ddp("loss/ce", state.model_state.loss)
 
-            reg_losses = state.model.module.regularization_loss()
+            reg_losses = unwrapped_model.regularization_loss()
             if reg_losses:
                 add_scalar_ddp("loss/regularization", reg_losses)
                 state.model_state.loss += reg_losses
 
-            shared_head_loss, shared_head_acc = state.model.module.shared_head_outputs.values()
+            shared_head_loss, shared_head_acc = unwrapped_model.shared_head_outputs.values()
             if shared_head_loss is not None and model_config.shared_head_weight > 0.0:
                 weighted_head_loss = shared_head_loss * model_config.shared_head_weight
                 assert state.model_state.loss is not None
@@ -431,13 +442,7 @@ def init_training(state: TrainState) -> bool:
 
     restored, ckpt_path = state.load_latest()
     if not restored:
-        logging.info(
-            f"[DDP] global_rank={dist.get_rank()} >>> "
-            "No checkpoint found."
-        )
+        logging.info(f"{util.get_ddp_msg()}No checkpoint found.")
     else:
-        logging.info(
-            f"[DDP] global_rank={dist.get_rank()} >>> "
-            f"Restored from {ckpt_path}, step {state.global_step}"
-        )
+        logging.info(f"{util.get_ddp_msg()}Restored from {ckpt_path}, step {state.global_step}")
     return restored

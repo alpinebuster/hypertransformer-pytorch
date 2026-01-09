@@ -357,3 +357,8 @@ flags.DEFINE_string(
     "Comma-separated list of visible GPU ids, e.g. '0', '0,1' or 'all'. "
     "If None or all, use all available GPUs. If set to `-1`, no GPUs are made available."
 )
+flags.DEFINE_bool(
+    "ddp",
+    False,
+    "If set, use PyTorch DistributedDataParallel for multi-GPU training.",
+)

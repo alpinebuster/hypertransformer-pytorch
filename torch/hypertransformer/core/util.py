@@ -8,7 +8,7 @@ import random
 
 from typing import TYPE_CHECKING, Callable, Optional, Iterable, Union
 
-from absl import logging
+from absl import logging, flags
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
 TransformerParamsFn = Callable[[int], "transformer.TransformerParams"]
 
+FLAGS = flags.FLAGS
 
 # ------------------------------------------------------------
 #   TransformerIO
@@ -272,8 +273,10 @@ class JointTransformerIO(_TransformerIO):
             ) # [I_l]
 
             weight_token: torch.Tensor = torch.cat([weight_emb, zero_emb], dim=-1)
+            assert isinstance(weight_sequence, list)
             weight_sequence.append(weight_token)
         # [num_weights, D_w + I_l]
+        assert isinstance(weight_sequence, list)
         weight_sequence = torch.stack(weight_sequence, dim=0)
 
         # Concatenate weight tokens before sample tokens
@@ -646,7 +649,7 @@ def _ddp_reduce_scalar(tensor: torch.Tensor) -> float:
     Reduce a scalar tensor across DDP ranks and return mean value (Python float).
     Safe for DDP / non-DDP.
     """
-    if not dist.is_available() or not dist.is_initialized():
+    if not FLAGS.ddp or not dist.is_available() or not dist.is_initialized():
         return tensor.item()
 
     t = tensor.detach()
@@ -666,3 +669,13 @@ def add_scalars_ddp(values: dict[str, torch.Tensor], add_scalar_fn):
             return
     for tag, tensor in values.items():
         add_scalar_fn(tag, _ddp_reduce_scalar(tensor))
+
+
+def unwrap_model(model):
+    return model.module if hasattr(model, "module") else model
+
+
+def get_ddp_msg():
+    if dist.is_available() and dist.is_initialized():
+        return f"[DDP] global_rank={dist.get_rank()} >>> "
+    return ""
