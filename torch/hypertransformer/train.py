@@ -2,7 +2,7 @@
 
 import os
 import functools
-from typing import Optional
+from typing import cast, Optional
 
 from absl import app, flags, logging
 
@@ -374,7 +374,7 @@ def train(
     restored = common.init_training(state)
     if not restored:
         model = restore_shared_features(
-            model=state.model,
+            model=cast(layerwise.LayerwiseModel, state.model),
         )
         if model:
             state.model = model

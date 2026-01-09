@@ -6622,4 +6622,4 @@ torch = ["onnx", "onnx-graphsurgeon", "onnxruntime", "onnxruntime-tools", "tenso
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.15"
-content-hash = "54142468f9ec31da1eef1c0c956c00d197128530aeaf06b5a5ee44d63a930cea"
+content-hash = "0f7cbbc11988658f2065348188f14f012e45cbdf524968f10a1f66dbe3408eb3"

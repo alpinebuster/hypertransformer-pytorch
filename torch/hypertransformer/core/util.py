@@ -4,12 +4,16 @@ import functools
 import glob
 import math
 import os
+import random
+
 from typing import TYPE_CHECKING, Callable, Optional, Iterable, Union
 
 from absl import logging
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.distributed as dist
+import numpy as np
 from torch.utils.tensorboard import SummaryWriter
 
 if TYPE_CHECKING:
@@ -611,3 +615,54 @@ def print_gpu_detailed_info() -> None:
         logging.info(f"Max Threads per SM: {props.max_threads_per_multi_processor}")
 
     logging.info("====================================")
+
+
+def setup_ddp(base_seed: int = 0) -> int:
+    dist.init_process_group(
+        backend="nccl",
+        init_method="env://",
+    )
+    local_rank = int(os.environ["LOCAL_RANK"])
+    torch.cuda.set_device(local_rank)
+
+    if dist.is_available() and dist.is_initialized():
+        global_rank = dist.get_rank()
+    else:
+        global_rank = 0
+    seed = base_seed + global_rank
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+    if global_rank == 0:
+        logging.info(f"[DDP] base_seed={base_seed}")
+    logging.info(f"[DDP] rank={global_rank}, seed={seed}")
+    return local_rank
+
+
+def _ddp_reduce_scalar(tensor: torch.Tensor) -> float:
+    """
+    Reduce a scalar tensor across DDP ranks and return mean value (Python float).
+    Safe for DDP / non-DDP.
+    """
+    if not dist.is_available() or not dist.is_initialized():
+        return tensor.item()
+
+    t = tensor.detach()
+    dist.all_reduce(t, op=dist.ReduceOp.SUM)
+    t /= dist.get_world_size()
+    return t.item()
+
+def add_scalar_ddp(name: str, value: torch.Tensor, add_scalar_fn):
+    if dist.is_available() and dist.is_initialized():
+        if dist.get_rank() != 0:
+            return
+    add_scalar_fn(name, _ddp_reduce_scalar(value))
+
+def add_scalars_ddp(values: dict[str, torch.Tensor], add_scalar_fn):
+    if dist.is_available() and dist.is_initialized():
+        if dist.get_rank() != 0:
+            return
+    for tag, tensor in values.items():
+        add_scalar_fn(tag, _ddp_reduce_scalar(tensor))

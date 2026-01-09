@@ -17,12 +17,14 @@
         "maxpool",
         "metadataset",
         "miniimagenet",
+        "nccl",
         "nohup",
         "omniglot",
         "onnx",
         "randn",
         "randperm",
         "semisupervised",
+        "torchrun",
         "wamup"
     ],
     "python.testing.pytestArgs": [
