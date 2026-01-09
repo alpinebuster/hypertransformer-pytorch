@@ -76,21 +76,23 @@ class TrainState:
     large_summaries: dict[str, torch.Tensor] = field(default_factory=dict)
 
     def save(self):
+        if dist.get_rank() != 0:
+            return
+
         logging.info(f"Saving checkpoint at step {self.global_step}")
         os.makedirs(self.checkpoint_dir, exist_ok=True)
         path = os.path.join(
             self.checkpoint_dir,
             f"{self.checkpoint_suffix}-{self.global_step}.pt"
         )
-        if dist.get_rank() == 0:
-            assert isinstance(self.model, DDP)
-            torch.save({
-                # Machines without a GPU can still use `torch.load` to load it
-                # No reliance on CUDA version
-                "model": {k: v.detach().cpu() for k, v in self.model.module.state_dict().items()},
-                "optimizer": self.optimizer.state_dict(),
-                "global_step": self.global_step,
-            }, path)
+        assert isinstance(self.model, DDP)
+        torch.save({
+            # Machines without a GPU can still use `torch.load` to load it
+            # No reliance on CUDA version
+            "model": {k: v.detach().cpu() for k, v in self.model.module.state_dict().items()},
+            "optimizer": self.optimizer.state_dict(),
+            "global_step": self.global_step,
+        }, path)
 
     def load_latest(self) -> tuple[bool, str]:
         ckpt_path = util.latest_checkpoint(self.checkpoint_dir)
@@ -245,10 +247,12 @@ def train(
     assert state.summary_writer is not None, "Must run `common.init_training(state)` before start training!"
 
     local_rank = util.setup_ddp()
+    global_rank = dist.get_rank()
     device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
     state.model = state.model.to(device)
-    for name, param in state.model.named_parameters():
-        logging.info(f"{name}, device: {param.device}, grad: {param.grad is None}")
+    if global_rank == 0:
+        for name, param in state.model.named_parameters():
+            logging.info(f"{name}, device: {param.device}, grad: {param.grad is None}")
     state.model.dataset.to(device)
 
     # DDP
@@ -382,8 +386,9 @@ def train(
             assert state.model_state.loss is not None
             state.small_summaries["loss/loss"] = state.model_state.loss
 
-        if (state.global_step - start_step) % 100 == 1:
+        if (state.global_step - start_step) % 100 == 1 and global_rank == 0:
             logging.info(
+                f"[DDP] global_rank={global_rank} >>> "
                 "Step: %d, Time per step: %f",
                 state.global_step,
                 (time.time() - starting_time) / (state.global_step - start_step),
@@ -426,7 +431,13 @@ def init_training(state: TrainState) -> bool:
 
     restored, ckpt_path = state.load_latest()
     if not restored:
-        logging.info("No checkpoint found.")
+        logging.info(
+            f"[DDP] global_rank={dist.get_rank()} >>> "
+            "No checkpoint found."
+        )
     else:
-        logging.info(f"Restored from {ckpt_path}, step {state.global_step}")
+        logging.info(
+            f"[DDP] global_rank={dist.get_rank()} >>> "
+            f"Restored from {ckpt_path}, step {state.global_step}"
+        )
     return restored

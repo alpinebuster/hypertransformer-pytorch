@@ -8,6 +8,7 @@ from absl import app, flags, logging
 
 import torch
 import torch.nn as nn
+import torch.distributed as dist
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 
@@ -220,7 +221,7 @@ def create_layerwise_model(
     optim_config: common.OptimizerConfig,
 ):
     """Creates a hierarchical Transformer-CNN model."""
-    logging.info("Building the model...")
+    logging.info(f"[DDP] global_rank={dist.get_rank()} >>> Building the model...")
 
     model = layerwise.build_model(
         model_config.cnn_model_name,
@@ -256,7 +257,7 @@ def create_shared_feature_model(
     optim_config: common.OptimizerConfig,
 ):
     """Creates an image feature extractor model for pre-training."""
-    logging.info("Building the model...")
+    logging.info(f"[DDP] global_rank={dist.get_rank()} >>> Building the model...")
 
     model = layerwise.build_model(
         model_config.cnn_model_name,
@@ -332,7 +333,7 @@ def train(
 ):
     """Main function training the model."""
     model_state = train_lib.ModelState()
-    logging.info("Creating the dataset...")
+    logging.info(f"[DDP] global_rank={dist.get_rank()} >>> Creating the dataset...")
 
     # ALL data
     numpy_arr = train_lib.make_numpy_array(
@@ -368,7 +369,7 @@ def train(
             model_config=layerwise_model_config,
         )
 
-    logging.info("Training...")
+    logging.info(f"[DDP] global_rank={dist.get_rank()} >>> Training...")
     state = create_model(**args)
 
     restored = common.init_training(state)
@@ -392,7 +393,8 @@ def main(argv):
     if len(argv) > 1:
         del argv
 
-    logging.info(f"FLAGS: {FLAGS.flag_values_dict()}")
+    if dist.get_rank() == 0:
+        logging.info(f"FLAGS: {FLAGS.flag_values_dict()}")
 
     gpus: str = FLAGS.gpus
     if gpus is None or gpus == "all":

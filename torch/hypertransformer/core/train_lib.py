@@ -12,6 +12,7 @@ from absl import logging
 import numpy as np
 import torch
 import torch.nn.functional as F
+import torch.distributed as dist
 
 from hypertransformer.core import common_ht
 from hypertransformer.core.common_ht import LayerwiseModelConfig, DatasetConfig
@@ -59,7 +60,10 @@ def _load_cache(data_config: DatasetConfig) -> Optional[dict[int, np.ndarray]]:
     files = glob.glob(pattern)
     path = files[0] if files else ""
 
-    logging.info(f'Looking for cache in "{data_config.cache_path}..."')
+    logging.info(
+        f"[DDP] global_rank={dist.get_rank()} >>> "
+        f'Looking for cache in "{data_config.cache_path}..."'
+    )
     if os.path.exists(path):
         # Reading a NumPy cache.
         with open(path, "rb") as dev:
@@ -87,6 +91,7 @@ def _load_cache(data_config: DatasetConfig) -> Optional[dict[int, np.ndarray]]:
                 index += 1
         return output
     logging.info(
+        f"[DDP] global_rank={dist.get_rank()} >>> "
         f"No cache files for {data_config.dataset_name} found. Falling back "
         "to torch dataset."
     )
