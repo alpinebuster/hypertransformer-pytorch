@@ -866,7 +866,7 @@ class ConvLayer(BaseCNNLayer):
             x = bn_layer(x)
         elif self.add_trainable_weights:
             # NOTE: always True
-            # FIXME:
+            # Episode-wise BatchNorm
             x = F.batch_norm(
                 x,
                 running_mean=None, # bn_layer.running_mean

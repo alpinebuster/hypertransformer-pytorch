@@ -298,6 +298,7 @@ def train(
 
         unwrapped_model = util.unwrap_model(state.model)
         unwrapped_model = cast("LayerwiseModel", unwrapped_model)
+        state.model.train()
         total_loss = torch.tensor(0., device=device)
         if common_flags.PRETRAIN_SHARED_FEATURE.value:
             _ = state.model(
@@ -331,38 +332,18 @@ def train(
                 # layer_outputs[layer.name] => (inputs, head)
                 heads = [output[1] for output in outputs if output[1] is not None]
 
-            with torch.no_grad():
-                test_predictions = state.model(
-                    test_batch.transformer_images,
-                    test_batch.transformer_labels,
-                    test_batch.cnn_images,
-                    mask=test_batch.transformer_masks,
-                    deterministic_inference=False,
-                )
-
             labels = train_batch.cnn_labels.long()
             # Train accuracy
             pred_labels = torch.argmax(predictions, dim=-1) # (B,)
-            num_cnn_samples: int = train_batch.cnn_labels.numel()
 
             def _acc(pred):
                 accuracy = (pred == train_batch.cnn_labels).float().sum()
-                return accuracy / num_cnn_samples
+                return accuracy / train_batch.cnn_labels.numel()
 
             accuracy = _acc(pred_labels)
             head_preds = [torch.argmax(head, dim=-1) for head in heads]
             head_accs = [_acc(pred) for pred in head_preds]
             state.small_summaries["accuracy/accuracy"] = accuracy
-
-            # Test accuracy
-            test_pred_labels = torch.argmax(test_predictions, dim=-1)
-            test_accuracy = (
-                (test_pred_labels == test_batch.cnn_labels)
-                .float()
-                .sum()
-                / num_cnn_samples
-            )
-            state.small_summaries["accuracy/test_accuracy"] = test_accuracy
 
             total_loss, _, warmup_weights = _make_loss(
                 labels,
@@ -397,6 +378,34 @@ def train(
 
             state.small_summaries["loss/loss"] = total_loss
 
+        # Backward + Step
+        state.optimizer.zero_grad()
+        total_loss.backward()
+        state.model_state.loss = total_loss.detach().item()
+        state.optimizer.step()
+        assert state.scheduler is not None
+        state.scheduler.step()
+
+        # Test accuracy
+        if not common_flags.PRETRAIN_SHARED_FEATURE.value:
+            state.model.eval()
+            with torch.no_grad():
+                test_predictions = state.model(
+                    test_batch.transformer_images,
+                    test_batch.transformer_labels,
+                    test_batch.cnn_images,
+                    mask=test_batch.transformer_masks,
+                    deterministic_inference=False,
+                )
+            test_pred_labels = torch.argmax(test_predictions, dim=-1)
+            test_accuracy = (
+                (test_pred_labels == test_batch.cnn_labels)
+                .float()
+                .sum()
+                / train_batch.cnn_labels.numel()
+            )
+            state.small_summaries["accuracy/test_accuracy"] = test_accuracy
+
         if (state.global_step - start_step) % 100 == 1 and (not FLAGS.ddp or global_rank == 0):
             logging.info(
                 f"{util.get_ddp_msg()}"
@@ -415,14 +424,6 @@ def train(
             add_scalars_ddp(state.small_summaries)
         if state.global_step % train_config.large_summaries_every == 0:
             add_scalars_ddp(state.large_summaries)
-
-        # Backward + Step
-        state.optimizer.zero_grad()
-        total_loss.backward()
-        state.model_state.loss = total_loss.detach().item()
-        state.optimizer.step()
-        assert state.scheduler is not None
-        state.scheduler.step()
 
         state.global_step += 1
 
