@@ -23,7 +23,7 @@ Folder `scripts` contains several training scripts for `omniglot`,
 They can be executed as follows:
 
 ```shell
-./scripts/omniglot_1shot_v1.sh --data_numpy_dir=./data_numpy_dir --train_log_dir=./logs
+./scripts/omniglot_1shot_v1.sh --data_dir=../omniglot --data_numpy_dir=../omniglot/cache --train_log_dir=../omniglot/logs/torch
 ```
 
 The evaluation script `evaluate_model.py` can be executed in parallel to
@@ -34,7 +34,8 @@ The evaluation script accepts the same parameters as the training script.
 
 ```sh
 # `nproc_per_node` -> Number of GPUs
-torchrun --nproc_per_node=2 ./hypertransformer/train.py \
+# `--` -> All the parameters that follow are not `torchrun` but passed to the python
+nohup torchrun --nproc_per_node=2 ./hypertransformer/train.py -- \
   --num_layerwise_features=8 --default_num_channels=8 \
   --samples_transformer=20 --samples_cnn=60 --num_labels=20 --learning_rate=0.02 \
   --learning_rate_decay_steps=100000.0 --learning_rate_decay_rate=0.95 \
@@ -54,7 +55,11 @@ torchrun --nproc_per_node=2 ./hypertransformer/train.py \
   --shuffle_labels_seed=2022 --test_rotation_probability=0.0 \
   --test_smooth_probability=0.0 --test_contrast_probability=0.0 \
   --test_resize_probability=0.0 --test_negate_probability=0.0 \
-  --test_roll_probability=0.0 --test_angle_range=-1.0
+  --test_roll_probability=0.0 --test_angle_range=-1.0 \
+  --data_dir=../omniglot --data_numpy_dir=../omniglot/cache \
+  --train_log_dir=../omniglot/logs/torch \
+  --ddp \
+  > omniglot_ddp.log 2>&1 &
 ```
 
 ## Code Structure

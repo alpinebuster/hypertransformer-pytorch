@@ -221,8 +221,8 @@ def _make_loss(
     if len(losses) == 1:
         return losses[0], losses, [torch.tensor(1.0, device=losses[0].device)]
 
-    loss, wamup_weights = _make_warmup_loss(losses[:-1], losses[-1], global_step)
-    return loss, losses, wamup_weights
+    loss, warmup_weights = _make_warmup_loss(losses[:-1], losses[-1], global_step)
+    return loss, losses, warmup_weights
 
 def train(
     train_config: TrainConfig,
@@ -265,6 +265,7 @@ def train(
 
     # DDP
     if FLAGS.ddp:
+        # torch.autograd.set_detect_anomaly(True)
         state.model = DDP(
             state.model,
             device_ids=[local_rank],
@@ -297,6 +298,7 @@ def train(
 
         unwrapped_model = util.unwrap_model(state.model)
         unwrapped_model = cast("LayerwiseModel", unwrapped_model)
+        total_loss = torch.tensor(0., device=device)
         if common_flags.PRETRAIN_SHARED_FEATURE.value:
             _ = state.model(
                 train_batch.transformer_images,
@@ -308,7 +310,7 @@ def train(
             )
             shared_head_loss, shared_head_acc = unwrapped_model.shared_head_outputs.values()
             assert shared_head_loss is not None and shared_head_acc is not None
-            state.model_state.loss = shared_head_loss
+            total_loss = shared_head_loss
 
             state.small_summaries["loss/shared_head_loss"] = shared_head_loss
             state.small_summaries["accuracy/shared_head_accuracy"] = shared_head_acc
@@ -329,13 +331,14 @@ def train(
                 # layer_outputs[layer.name] => (inputs, head)
                 heads = [output[1] for output in outputs if output[1] is not None]
 
-            test_predictions = state.model(
-                test_batch.transformer_images,
-                test_batch.transformer_labels,
-                test_batch.cnn_images,
-                mask=test_batch.transformer_masks,
-                deterministic_inference=False,
-            )
+            with torch.no_grad():
+                test_predictions = state.model(
+                    test_batch.transformer_images,
+                    test_batch.transformer_labels,
+                    test_batch.cnn_images,
+                    mask=test_batch.transformer_masks,
+                    deterministic_inference=False,
+                )
 
             labels = train_batch.cnn_labels.long()
             # Train accuracy
@@ -361,25 +364,23 @@ def train(
             )
             state.small_summaries["accuracy/test_accuracy"] = test_accuracy
 
-            state.model_state.loss, _, warmup_weights = _make_loss(
+            total_loss, _, warmup_weights = _make_loss(
                 labels,
                 predictions,
                 heads,
                 state.global_step,
             )
-            assert state.model_state.loss is not None
-            add_scalar_ddp("loss/ce", state.model_state.loss)
+            add_scalar_ddp("loss/ce", total_loss)
 
             reg_losses = unwrapped_model.regularization_loss()
             if reg_losses:
                 add_scalar_ddp("loss/regularization", reg_losses)
-                state.model_state.loss += reg_losses
+                total_loss += reg_losses
 
             shared_head_loss, shared_head_acc = unwrapped_model.shared_head_outputs.values()
-            if shared_head_loss is not None and model_config.shared_head_weight > 0.0:
+            if shared_head_loss is not None and model_config.shared_head_weight > 0.:
                 weighted_head_loss = shared_head_loss * model_config.shared_head_weight
-                assert state.model_state.loss is not None
-                state.model_state.loss += weighted_head_loss
+                total_loss += weighted_head_loss
 
                 add_scalar_ddp("loss/shared_head_loss", shared_head_loss)
                 add_scalar_ddp("loss/weighted_shared_head_loss", weighted_head_loss)
@@ -391,11 +392,10 @@ def train(
             if heads:
                 add_scalar_ddp("warmup_weights/main", warmup_weights[-1])
 
-            if shared_head_acc is not None and model_config.shared_head_weight > 0.0:
+            if shared_head_acc is not None and model_config.shared_head_weight > 0.:
                 add_scalar_ddp("accuracy/shared_head_accuracy", shared_head_acc[-1])
 
-            assert state.model_state.loss is not None
-            state.small_summaries["loss/loss"] = state.model_state.loss
+            state.small_summaries["loss/loss"] = total_loss
 
         if (state.global_step - start_step) % 100 == 1 and (not FLAGS.ddp or global_rank == 0):
             logging.info(
@@ -418,8 +418,8 @@ def train(
 
         # Backward + Step
         state.optimizer.zero_grad()
-        assert state.model_state.loss is not None
-        state.model_state.loss.backward()
+        total_loss.backward()
+        state.model_state.loss = total_loss.detach().item()
         state.optimizer.step()
         assert state.scheduler is not None
         state.scheduler.step()

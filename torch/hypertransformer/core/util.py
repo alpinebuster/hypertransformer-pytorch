@@ -676,6 +676,6 @@ def unwrap_model(model):
 
 
 def get_ddp_msg():
-    if dist.is_available() and dist.is_initialized():
+    if FLAGS.ddp and dist.is_available() and dist.is_initialized():
         return f"[DDP] global_rank={dist.get_rank()} >>> "
     return ""

@@ -23,7 +23,7 @@ from hypertransformer.core import util
 class ModelState:
     """Model state."""
 
-    loss: Optional[torch.Tensor] = None
+    loss: Optional[float] = None
 
 
 def _make_augmentation_config(data_config: DatasetConfig, num_labels: int):
