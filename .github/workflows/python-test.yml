@@ -42,7 +42,7 @@ jobs:
     - name: Install dependencies
       working-directory: ./torch
       run: |
-        poetry install --no-interaction --no-root
+        poetry install --no-interaction
 
     - name: Test with pytest
       working-directory: ./torch
