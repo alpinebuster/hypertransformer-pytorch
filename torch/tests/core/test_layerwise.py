@@ -163,7 +163,7 @@ def test_layer_with_activation_after_bn_different_activation_before_bn(layerwise
     """Tests the option to use activation before or after batchnorm."""
     (
         model_config,
-        _,
+        dataset,
     ) = layerwise_params
 
     def act_fn(x):
@@ -175,16 +175,17 @@ def test_layer_with_activation_after_bn_different_activation_before_bn(layerwise
         act_fn=act_fn,
         act_after_bn=True,
     )
+    layer_act_after._setup(dataset.cnn_images)
     layer_act_before = layerwise.ConvLayer(
         name="test_layer_activation_before",
         model_config=model_config,
         act_fn=act_fn,
         act_after_bn=False,
     )
+    layer_act_before._setup(dataset.cnn_images)
 
-    images = torch.randn(100, 3, 64, 64)
-    out_after = layer_act_after(images)
-    out_before = layer_act_before(images)
+    out_after = layer_act_after(dataset.cnn_images)
+    out_before = layer_act_before(dataset.cnn_images)
 
     # act_after_bn=True → The final step is `act_fn` → all 1s
     assert torch.allclose(
