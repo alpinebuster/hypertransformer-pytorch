@@ -86,7 +86,7 @@ class TrainState:
             f"{self.checkpoint_suffix}-{self.global_step}.pt"
         )
         unwrapped_model = util.unwrap_model(self.model)
-        unwrapped_model = cast(LayerwiseModel, unwrapped_model)
+        unwrapped_model = cast("LayerwiseModel", unwrapped_model)
         torch.save({
             # Machines without a GPU can still use `torch.load` to load it
             # No reliance on CUDA version
@@ -296,7 +296,7 @@ def train(
         test_batch.to(device)
 
         unwrapped_model = util.unwrap_model(state.model)
-        unwrapped_model = cast(LayerwiseModel, unwrapped_model)
+        unwrapped_model = cast("LayerwiseModel", unwrapped_model)
         if common_flags.PRETRAIN_SHARED_FEATURE.value:
             _ = state.model(
                 train_batch.transformer_images,
@@ -397,9 +397,9 @@ def train(
             assert state.model_state.loss is not None
             state.small_summaries["loss/loss"] = state.model_state.loss
 
-        if (state.global_step - start_step) % 100 == 1 and global_rank == 0:
+        if (state.global_step - start_step) % 100 == 1 and (not FLAGS.ddp or global_rank == 0):
             logging.info(
-                f"[DDP] global_rank={global_rank} >>> "
+                f"{util.get_ddp_msg()}"
                 "Step: %d, Time per step: %f",
                 state.global_step,
                 (time.time() - starting_time) / (state.global_step - start_step),
