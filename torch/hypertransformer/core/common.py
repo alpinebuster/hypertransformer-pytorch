@@ -269,6 +269,15 @@ def train(
     # DDP
     if FLAGS.ddp:
         # torch.autograd.set_detect_anomaly(True)
+        """
+        When `find_unused_parameters=True`, DDP will, after each forward-backward pass:
+
+        * Check all the model parameters to determine which ones did not receive gradients.
+        * Only synchronize the parameters that have gradients, skipping those that were not used.
+
+        This checking operation adds extra overhead for every step. Although the cost is small,
+        in large models with multiple GPUs, it can accumulate and result in noticeable performance loss.
+        """
         state.model = DDP(
             state.model,
             device_ids=[local_rank],
