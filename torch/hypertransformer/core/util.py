@@ -9,15 +9,18 @@ import random
 from typing import TYPE_CHECKING, Callable, Optional, Iterable, Union
 
 from absl import logging, flags
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributed as dist
-import numpy as np
+from torch.optim import Optimizer
+from torch.optim.lr_scheduler import LRScheduler
 from torch.utils.tensorboard import SummaryWriter
 
 if TYPE_CHECKING:
     from hypertransformer.core import transformer
+    from hypertransformer.core import common
 
 TransformerParamsFn = Callable[[int], "transformer.TransformerParams"]
 
@@ -679,3 +682,35 @@ def get_ddp_msg():
     if FLAGS.ddp and dist.is_available() and dist.is_initialized():
         return f"[DDP] global_rank={dist.get_rank()} >>> "
     return ""
+
+
+def make_optimizer(
+    optim_config: "common.OptimizerConfig",
+    model: nn.Module,
+) -> tuple[Optimizer, LRScheduler]:
+    # AdamW lr -> 1e-4
+    # SGD lr   -> 1e-5 ~ 1e-6
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=optim_config.learning_rate/100,
+    )
+    # optimizer = torch.optim.SGD(
+    #     model.parameters(),
+    #     lr=optim_config.learning_rate,
+    #     # momentum=optim_config.learning_momentum,
+    # )
+
+    # scheduler = torch.optim.lr_scheduler.StepLR(
+    #     optimizer,
+    #     step_size=optim_config.lr_decay_steps,
+    #     gamma=optim_config.lr_decay_rate,
+    # )
+    scheduler = torch.optim.lr_scheduler.LambdaLR(
+        optimizer,
+        lr_lambda=lambda step: (
+            optim_config.lr_decay_rate
+            ** (step / optim_config.lr_decay_steps)
+        ),
+    )
+
+    return optimizer, scheduler

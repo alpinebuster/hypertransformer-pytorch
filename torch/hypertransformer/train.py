@@ -9,8 +9,6 @@ from absl import app, flags, logging
 import torch
 import torch.nn as nn
 import torch.distributed as dist
-from torch.optim import Optimizer
-from torch.optim.lr_scheduler import LRScheduler
 
 from hypertransformer import common_flags
 from hypertransformer import eval_model_flags  # pylint:disable=unused-import
@@ -40,6 +38,7 @@ def make_train_config():
 def make_optimizer_config():
     return common.OptimizerConfig(
         learning_rate=FLAGS.learning_rate,
+        learning_momentum=FLAGS.learning_momentum,
         lr_decay_steps=FLAGS.learning_rate_decay_steps,
         lr_decay_rate=FLAGS.learning_rate_decay_rate,
     )
@@ -192,28 +191,6 @@ def make_test_dataset_config(dataset_spec=""):
 # ------------------------------------------------------------
 
 
-def _make_optimizer(optim_config: common.OptimizerConfig, model: nn.Module) -> tuple[Optimizer, LRScheduler]:
-    optimizer = torch.optim.SGD(
-        model.parameters(),
-        lr=optim_config.learning_rate,
-    )
-
-    # scheduler = torch.optim.lr_scheduler.StepLR(
-    #     optimizer,
-    #     step_size=optim_config.lr_decay_steps,
-    #     gamma=optim_config.lr_decay_rate,
-    # )
-    scheduler = torch.optim.lr_scheduler.LambdaLR(
-        optimizer,
-        lr_lambda=lambda step: (
-            optim_config.lr_decay_rate
-            ** (step / optim_config.lr_decay_steps)
-        ),
-    )
-
-    return optimizer, scheduler
-
-
 def create_layerwise_model(
     model_config: common_ht.LayerwiseModelConfig,
     dataset: common_ht.DatasetSamples,
@@ -239,7 +216,7 @@ def create_layerwise_model(
             enable_fe_dropout=True,
             only_shared_feature=False,
         )
-    optimizer, scheduler = _make_optimizer(optim_config, model)
+    optimizer, scheduler = util.make_optimizer(optim_config, model)
 
     return common.TrainState(
         model=model,
@@ -273,7 +250,7 @@ def create_shared_feature_model(
             enable_fe_dropout=True,
             only_shared_feature=True,
         )
-    optimizer, scheduler = _make_optimizer(optim_config, model)
+    optimizer, scheduler = util.make_optimizer(optim_config, model)
 
     return common.TrainState(
         model=model,
@@ -381,9 +358,10 @@ def train(
             state.model = model
 
     common.train(
-        train_config,
-        layerwise_model_config,
-        state,
+        train_config=train_config,
+        model_config=layerwise_model_config,
+        optimizer_config=optimizer_config,
+        state=state,
         batch_provider=(train_batch_provider, test_batch_provider),
     )
 

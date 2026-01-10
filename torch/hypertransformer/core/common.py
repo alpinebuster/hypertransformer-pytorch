@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from hypertransformer.core.layerwise import LayerwiseModel
     from hypertransformer.core import train_lib
     from hypertransformer.core import common_ht
+    from hypertransformer.core import common
 
 FLAGS = flags.FLAGS
 
@@ -118,6 +119,7 @@ class OptimizerConfig:
     """Optimizer configuration."""
 
     learning_rate: float = 1e-3
+    learning_momentum: float = .9
     lr_decay_steps: int = 10000
     lr_decay_rate: float = 1.0
 
@@ -227,6 +229,7 @@ def _make_loss(
 def train(
     train_config: TrainConfig,
     model_config: "common_ht.LayerwiseModelConfig",
+    optimizer_config: "common.OptimizerConfig",
     state: TrainState,
     batch_provider: tuple[
         Callable[[], "common_ht.DatasetSamples"],
@@ -272,6 +275,7 @@ def train(
             output_device=local_rank,
             find_unused_parameters=False, # Speed up
         )
+        state.optimizer, state.scheduler = util.make_optimizer(optimizer_config, state.model)
 
     start_step = state.global_step
     starting_time = time.time()
