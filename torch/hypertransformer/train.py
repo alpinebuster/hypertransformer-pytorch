@@ -2,14 +2,13 @@
 
 import os
 import functools
-from typing import Optional
+from typing import cast, Optional
 
 from absl import app, flags, logging
 
 import torch
 import torch.nn as nn
-from torch.optim import Optimizer
-from torch.optim.lr_scheduler import LRScheduler
+import torch.distributed as dist
 
 from hypertransformer import common_flags
 from hypertransformer import eval_model_flags  # pylint:disable=unused-import
@@ -39,6 +38,7 @@ def make_train_config():
 def make_optimizer_config():
     return common.OptimizerConfig(
         learning_rate=FLAGS.learning_rate,
+        learning_momentum=FLAGS.learning_momentum,
         lr_decay_steps=FLAGS.learning_rate_decay_steps,
         lr_decay_rate=FLAGS.learning_rate_decay_rate,
     )
@@ -191,28 +191,6 @@ def make_test_dataset_config(dataset_spec=""):
 # ------------------------------------------------------------
 
 
-def _make_optimizer(optim_config: common.OptimizerConfig, model: nn.Module) -> tuple[Optimizer, LRScheduler]:
-    optimizer = torch.optim.SGD(
-        model.parameters(),
-        lr=optim_config.learning_rate,
-    )
-
-    # scheduler = torch.optim.lr_scheduler.StepLR(
-    #     optimizer,
-    #     step_size=optim_config.lr_decay_steps,
-    #     gamma=optim_config.lr_decay_rate,
-    # )
-    scheduler = torch.optim.lr_scheduler.LambdaLR(
-        optimizer,
-        lr_lambda=lambda step: (
-            optim_config.lr_decay_rate
-            ** (step / optim_config.lr_decay_steps)
-        ),
-    )
-
-    return optimizer, scheduler
-
-
 def create_layerwise_model(
     model_config: common_ht.LayerwiseModelConfig,
     dataset: common_ht.DatasetSamples,
@@ -220,7 +198,7 @@ def create_layerwise_model(
     optim_config: common.OptimizerConfig,
 ):
     """Creates a hierarchical Transformer-CNN model."""
-    logging.info("Building the model...")
+    logging.info(f"{util.get_ddp_msg()}Building the model...")
 
     model = layerwise.build_model(
         model_config.cnn_model_name,
@@ -238,7 +216,7 @@ def create_layerwise_model(
             enable_fe_dropout=True,
             only_shared_feature=False,
         )
-    optimizer, scheduler = _make_optimizer(optim_config, model)
+    optimizer, scheduler = util.make_optimizer(optim_config, model)
 
     return common.TrainState(
         model=model,
@@ -256,22 +234,23 @@ def create_shared_feature_model(
     optim_config: common.OptimizerConfig,
 ):
     """Creates an image feature extractor model for pre-training."""
-    logging.info("Building the model...")
+    logging.info(f"{util.get_ddp_msg()}Building the model...")
 
     model = layerwise.build_model(
         model_config.cnn_model_name,
         model_config=model_config,
         dataset=dataset,
     )
-    model.setup(
-        dataset.transformer_images,
-        dataset.transformer_labels,
-        dataset.transformer_masks,
-        mask_random_samples=True,
-        enable_fe_dropout=True,
-        only_shared_feature=True,
-    )
-    optimizer, scheduler = _make_optimizer(optim_config, model)
+    with torch.no_grad():
+        model.setup(
+            dataset.transformer_images,
+            dataset.transformer_labels,
+            dataset.transformer_masks,
+            mask_random_samples=True,
+            enable_fe_dropout=True,
+            only_shared_feature=True,
+        )
+    optimizer, scheduler = util.make_optimizer(optim_config, model)
 
     return common.TrainState(
         model=model,
@@ -331,7 +310,7 @@ def train(
 ):
     """Main function training the model."""
     model_state = train_lib.ModelState()
-    logging.info("Creating the dataset...")
+    logging.info(f"{util.get_ddp_msg()}Creating the dataset...")
 
     # ALL data
     numpy_arr = train_lib.make_numpy_array(
@@ -367,21 +346,22 @@ def train(
             model_config=layerwise_model_config,
         )
 
-    logging.info("Training...")
+    logging.info(f"{util.get_ddp_msg()}Training...")
     state = create_model(**args)
 
     restored = common.init_training(state)
     if not restored:
         model = restore_shared_features(
-            model=state.model,
+            model=cast(layerwise.LayerwiseModel, state.model),
         )
         if model:
             state.model = model
 
     common.train(
-        train_config,
-        layerwise_model_config,
-        state,
+        train_config=train_config,
+        model_config=layerwise_model_config,
+        optimizer_config=optimizer_config,
+        state=state,
         batch_provider=(train_batch_provider, test_batch_provider),
     )
 
@@ -391,7 +371,10 @@ def main(argv):
     if len(argv) > 1:
         del argv
 
-    logging.info(f"FLAGS: {FLAGS.flag_values_dict()}")
+    if FLAGS.ddp:
+        util.setup_ddp()
+    if FLAGS.ddp and dist.get_rank() == 0:
+        logging.info(f"FLAGS: {FLAGS.flag_values_dict()}")
 
     gpus: str = FLAGS.gpus
     if gpus is None or gpus == "all":

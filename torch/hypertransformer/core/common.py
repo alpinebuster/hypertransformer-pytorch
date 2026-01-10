@@ -5,14 +5,16 @@ import dataclasses
 import os
 import time
 
-from typing import TYPE_CHECKING, Callable, Optional, \
-    TypedDict
+from typing import cast, TYPE_CHECKING, Callable, Optional, \
+    TypedDict, Union
 from typing_extensions import Annotated
 
 from absl import flags, logging
 import numpy as np
 import torch
 import torch.nn.functional as F
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 from hypertransformer.core import util
 from hypertransformer import common_flags
@@ -21,6 +23,7 @@ if TYPE_CHECKING:
     from hypertransformer.core.layerwise import LayerwiseModel
     from hypertransformer.core import train_lib
     from hypertransformer.core import common_ht
+    from hypertransformer.core import common
 
 FLAGS = flags.FLAGS
 
@@ -52,7 +55,7 @@ class TrainConfig:
     """Training configuration."""
 
     train_steps: int = 10000
-    steps_between_saves: int = 5000
+    steps_between_saves: int = 1000
     small_summaries_every: int = 100
     large_summaries_every: int = 500
 
@@ -60,7 +63,7 @@ class TrainConfig:
 @dataclasses.dataclass
 class TrainState:
     """Model state."""
-    model: "LayerwiseModel"
+    model: Union["LayerwiseModel", DDP]
     model_state: "train_lib.ModelState"
     optimizer: torch.optim.Optimizer
     scheduler: Optional[torch.optim.lr_scheduler.LRScheduler]
@@ -70,20 +73,28 @@ class TrainState:
     checkpoint_suffix: str = "model"
 
     summary_writer: Optional[util.MultiFileWriter] = None
-    small_summaries: dict[str, float] = field(default_factory=dict)
-    large_summaries: dict[str, float] = field(default_factory=dict)
+    small_summaries: dict[str, torch.Tensor] = field(default_factory=dict)
+    large_summaries: dict[str, torch.Tensor] = field(default_factory=dict)
 
     def save(self):
+        if FLAGS.ddp and dist.get_rank() != 0:
+            return
+
         logging.info(f"Saving checkpoint at step {self.global_step}")
         os.makedirs(self.checkpoint_dir, exist_ok=True)
         path = os.path.join(
             self.checkpoint_dir,
             f"{self.checkpoint_suffix}-{self.global_step}.pt"
         )
+        unwrapped_model = util.unwrap_model(self.model)
+        unwrapped_model = cast("LayerwiseModel", unwrapped_model)
         torch.save({
             # Machines without a GPU can still use `torch.load` to load it
             # No reliance on CUDA version
-            "model": {k: v.detach().cpu() for k, v in self.model.state_dict().items()},
+            "model": {
+                k: v.detach().cpu()
+                for k, v in unwrapped_model.state_dict().items()
+            },
             "optimizer": self.optimizer.state_dict(),
             "global_step": self.global_step,
         }, path)
@@ -95,7 +106,8 @@ class TrainState:
 
         data = torch.load(ckpt_path, map_location="cpu")
 
-        self.model.load_state_dict(data["model"])
+        assert not isinstance(self.model, DDP)
+        self.model.load_state_dict(data["model"], strict=False)
         self.optimizer.load_state_dict(data["optimizer"])
         self.global_step = int(data.get("global_step", 0))
 
@@ -107,6 +119,7 @@ class OptimizerConfig:
     """Optimizer configuration."""
 
     learning_rate: float = 1e-3
+    learning_momentum: float = .9
     lr_decay_steps: int = 10000
     lr_decay_rate: float = 1.0
 
@@ -162,7 +175,7 @@ def _make_warmup_loss(
     num_heads = len(loss_heads)
     # The warmup time length corresponding to each head
     steps_per_stage = FLAGS.warmup_steps / num_heads
-    loss = 0.
+    loss = torch.tensor(0., device=loss_prediction.device)
     weights = []
 
     # The following code ends up returning just the true model head loss
@@ -210,12 +223,13 @@ def _make_loss(
     if len(losses) == 1:
         return losses[0], losses, [torch.tensor(1.0, device=losses[0].device)]
 
-    loss, wamup_weights = _make_warmup_loss(losses[:-1], losses[-1], global_step)
-    return loss, losses, wamup_weights
+    loss, warmup_weights = _make_warmup_loss(losses[:-1], losses[-1], global_step)
+    return loss, losses, warmup_weights
 
 def train(
     train_config: TrainConfig,
     model_config: "common_ht.LayerwiseModelConfig",
+    optimizer_config: "common.OptimizerConfig",
     state: TrainState,
     batch_provider: tuple[
         Callable[[], "common_ht.DatasetSamples"],
@@ -239,13 +253,38 @@ def train(
     """
     assert state.summary_writer is not None, "Must run `common.init_training(state)` before start training!"
 
-    # Get the device where the model is currently located by taking the first `torch.nn.Parameter`
+    local_rank = None
+    global_rank = None
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    state.model.to(device)
-    for name, param in state.model.named_parameters():
-        print(f"{name}, device: {param.device}")
-        print(f"{name}, grad: {param.grad is None}")
+    if FLAGS.ddp:
+        local_rank = int(os.environ["LOCAL_RANK"])
+        global_rank = dist.get_rank()
+        device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
+    state.model = state.model.to(device)
+    if not FLAGS.ddp or global_rank == 0:
+        for name, param in state.model.named_parameters():
+            logging.info(f"{name}, device: {param.device}, grad: {param.grad is None}")
     state.model.dataset.to(device)
+
+    # DDP
+    if FLAGS.ddp:
+        # torch.autograd.set_detect_anomaly(True)
+        """
+        When `find_unused_parameters=True`, DDP will, after each forward-backward pass:
+
+        * Check all the model parameters to determine which ones did not receive gradients.
+        * Only synchronize the parameters that have gradients, skipping those that were not used.
+
+        This checking operation adds extra overhead for every step. Although the cost is small,
+        in large models with multiple GPUs, it can accumulate and result in noticeable performance loss.
+        """
+        state.model = DDP(
+            state.model,
+            device_ids=[local_rank],
+            output_device=local_rank,
+            find_unused_parameters=True, # Speed up
+        )
+        state.optimizer, state.scheduler = util.make_optimizer(optimizer_config, state.model)
 
     start_step = state.global_step
     starting_time = time.time()
@@ -255,16 +294,25 @@ def train(
             state.summary_writer.add_scalar,
             global_step=state.global_step,
         )
-        add_scalars = functools.partial(
-            state.summary_writer.add_scalars,
-            global_step=state.global_step,
+        add_scalar_ddp = functools.partial(
+            util.add_scalar_ddp,
+            add_scalar_fn=add_scalar,
         )
+        add_scalars_ddp = functools.partial(
+            util.add_scalars_ddp,
+            add_scalar_fn=add_scalar,
+        )
+
         train_batch = batch_provider[0]()
         test_batch = batch_provider[1]()
 
         train_batch.to(device)
         test_batch.to(device)
 
+        unwrapped_model = util.unwrap_model(state.model)
+        unwrapped_model = cast("LayerwiseModel", unwrapped_model)
+        state.model.train()
+        total_loss = torch.tensor(0., device=device)
         if common_flags.PRETRAIN_SHARED_FEATURE.value:
             _ = state.model(
                 train_batch.transformer_images,
@@ -274,12 +322,12 @@ def train(
                 enable_fe_dropout=True,
                 only_shared_feature=True,
             )
-            shared_head_loss, shared_head_acc = state.model.shared_head_outputs.values()
+            shared_head_loss, shared_head_acc = unwrapped_model.shared_head_outputs.values()
             assert shared_head_loss is not None and shared_head_acc is not None
-            state.model_state.loss = shared_head_loss
+            total_loss = shared_head_loss
 
-            state.small_summaries["loss/shared_head_loss"] = shared_head_loss.item()
-            state.small_summaries["accuracy/shared_head_accuracy"] = shared_head_acc.item()
+            state.small_summaries["loss/shared_head_loss"] = shared_head_loss
+            state.small_summaries["accuracy/shared_head_accuracy"] = shared_head_acc
         else:
             predictions = state.model(
                 train_batch.transformer_images,
@@ -293,80 +341,95 @@ def train(
 
             heads = []
             if model_config.train_heads:
-                outputs = state.model.layer_outputs.values()
+                outputs = unwrapped_model.layer_outputs.values()
                 # layer_outputs[layer.name] => (inputs, head)
                 heads = [output[1] for output in outputs if output[1] is not None]
-
-            test_predictions = state.model(
-                test_batch.transformer_images,
-                test_batch.transformer_labels,
-                test_batch.cnn_images,
-                mask=test_batch.transformer_masks,
-                deterministic_inference=False,
-            )
 
             labels = train_batch.cnn_labels.long()
             # Train accuracy
             pred_labels = torch.argmax(predictions, dim=-1) # (B,)
-            num_cnn_samples: int = train_batch.cnn_labels.numel()
 
             def _acc(pred):
                 accuracy = (pred == train_batch.cnn_labels).float().sum()
-                return accuracy / num_cnn_samples
+                return accuracy / train_batch.cnn_labels.numel()
 
             accuracy = _acc(pred_labels)
             head_preds = [torch.argmax(head, dim=-1) for head in heads]
             head_accs = [_acc(pred) for pred in head_preds]
-            state.small_summaries["accuracy/accuracy"] = accuracy.item()
+            state.small_summaries["accuracy/accuracy"] = accuracy
 
-            # Test accuracy
-            test_pred_labels = torch.argmax(test_predictions, dim=-1)
-            test_accuracy = (
-                (test_pred_labels == test_batch.cnn_labels)
-                .float()
-                .sum()
-                / num_cnn_samples
-            )
-            state.small_summaries["accuracy/test_accuracy"] = test_accuracy.item()
-
-            state.model_state.loss, _, warmup_weights = _make_loss(
+            total_loss, _, warmup_weights = _make_loss(
                 labels,
                 predictions,
                 heads,
                 state.global_step,
             )
-            assert state.model_state.loss is not None
-            add_scalar("loss/ce", state.model_state.loss.item())
+            add_scalar_ddp("loss/ce", total_loss)
 
-            reg_losses = state.model.regularization_loss()
+            reg_losses = unwrapped_model.regularization_loss()
             if reg_losses:
-                add_scalar("loss/regularization", reg_losses.item())
-                state.model_state.loss += reg_losses
+                add_scalar_ddp("loss/regularization", reg_losses)
+                total_loss += reg_losses
 
-            shared_head_loss, shared_head_acc = state.model.shared_head_outputs.values()
-            if shared_head_loss is not None and model_config.shared_head_weight > 0.0:
+            shared_head_loss, shared_head_acc = unwrapped_model.shared_head_outputs.values()
+            if shared_head_loss is not None and model_config.shared_head_weight > 0.:
                 weighted_head_loss = shared_head_loss * model_config.shared_head_weight
-                assert state.model_state.loss is not None
-                state.model_state.loss += weighted_head_loss
+                total_loss += weighted_head_loss
 
-                add_scalar("loss/shared_head_loss", shared_head_loss.item())
-                add_scalar("loss/weighted_shared_head_loss", weighted_head_loss.item())
+                add_scalar_ddp("loss/shared_head_loss", shared_head_loss)
+                add_scalar_ddp("loss/weighted_shared_head_loss", weighted_head_loss)
 
             for head_id, acc in enumerate(head_accs):
-                add_scalar(f"accuracy/head-{head_id+1}", acc.item())
+                add_scalar_ddp(f"accuracy/head-{head_id+1}", acc)
             for head_id, warmup_weight in enumerate(warmup_weights[:-1]):
-                add_scalar(f"warmup_weights/head-{head_id+1}", warmup_weight.item())
+                add_scalar_ddp(f"warmup_weights/head-{head_id+1}", warmup_weight)
             if heads:
-                add_scalar("warmup_weights/main", warmup_weights[-1].item())
+                add_scalar_ddp("warmup_weights/main", warmup_weights[-1])
 
-            if shared_head_acc is not None and model_config.shared_head_weight > 0.0:
-                add_scalar("accuracy/shared_head_accuracy", shared_head_acc[-1].item())
+            if shared_head_acc is not None and model_config.shared_head_weight > 0.:
+                add_scalar_ddp("accuracy/shared_head_accuracy", shared_head_acc[-1])
 
-            assert state.model_state.loss is not None
-            state.small_summaries["loss/loss"] = state.model_state.loss.item()
+            state.small_summaries["loss/loss"] = total_loss
 
-        if (state.global_step - start_step) % 100 == 1:
+        # Backward + Step
+        state.optimizer.zero_grad()
+        total_loss.backward()
+        state.model_state.loss = total_loss.detach().item()
+
+        # if FLAGS.ddp:
+        #     for name, p in unwrapped_model.named_parameters():
+        #         if p.requires_grad and p.grad is None:
+        #             logging.info(
+        #                 f"[DDP][rank={global_rank}] NO GRAD: {name}"
+        #             )
+
+        state.optimizer.step()
+        assert state.scheduler is not None
+        state.scheduler.step()
+
+        # Test accuracy
+        if not common_flags.PRETRAIN_SHARED_FEATURE.value:
+            state.model.eval()
+            with torch.no_grad():
+                test_predictions = state.model(
+                    test_batch.transformer_images,
+                    test_batch.transformer_labels,
+                    test_batch.cnn_images,
+                    mask=test_batch.transformer_masks,
+                    deterministic_inference=False,
+                )
+            test_pred_labels = torch.argmax(test_predictions, dim=-1)
+            test_accuracy = (
+                (test_pred_labels == test_batch.cnn_labels)
+                .float()
+                .sum()
+                / train_batch.cnn_labels.numel()
+            )
+            state.small_summaries["accuracy/test_accuracy"] = test_accuracy
+
+        if (state.global_step - start_step) % 100 == 1 and (not FLAGS.ddp or global_rank == 0):
             logging.info(
+                f"{util.get_ddp_msg()}"
                 "Step: %d, Time per step: %f",
                 state.global_step,
                 (time.time() - starting_time) / (state.global_step - start_step),
@@ -379,17 +442,9 @@ def train(
             state.save()
 
         if state.global_step % train_config.small_summaries_every == 0:
-            add_scalars(state.small_summaries)
+            add_scalars_ddp(state.small_summaries)
         if state.global_step % train_config.large_summaries_every == 0:
-            add_scalars(state.large_summaries)
-
-        # Backward + Step
-        state.optimizer.zero_grad()
-        assert state.model_state.loss is not None
-        state.model_state.loss.backward()
-        state.optimizer.step()
-        if state.scheduler is not None:
-            state.scheduler.step()
+            add_scalars_ddp(state.large_summaries)
 
         state.global_step += 1
 
@@ -409,7 +464,7 @@ def init_training(state: TrainState) -> bool:
 
     restored, ckpt_path = state.load_latest()
     if not restored:
-        logging.info("No checkpoint found.")
+        logging.info(f"{util.get_ddp_msg()}No checkpoint found.")
     else:
-        logging.info(f"Restored from {ckpt_path}, step {state.global_step}")
+        logging.info(f"{util.get_ddp_msg()}Restored from {ckpt_path}, step {state.global_step}")
     return restored

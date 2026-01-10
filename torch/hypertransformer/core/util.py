@@ -4,19 +4,27 @@ import functools
 import glob
 import math
 import os
+import random
+
 from typing import TYPE_CHECKING, Callable, Optional, Iterable, Union
 
-from absl import logging
+from absl import logging, flags
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.distributed as dist
+from torch.optim import Optimizer
+from torch.optim.lr_scheduler import LRScheduler
 from torch.utils.tensorboard import SummaryWriter
 
 if TYPE_CHECKING:
     from hypertransformer.core import transformer
+    from hypertransformer.core import common
 
 TransformerParamsFn = Callable[[int], "transformer.TransformerParams"]
 
+FLAGS = flags.FLAGS
 
 # ------------------------------------------------------------
 #   TransformerIO
@@ -268,8 +276,10 @@ class JointTransformerIO(_TransformerIO):
             ) # [I_l]
 
             weight_token: torch.Tensor = torch.cat([weight_emb, zero_emb], dim=-1)
+            assert isinstance(weight_sequence, list)
             weight_sequence.append(weight_token)
         # [num_weights, D_w + I_l]
+        assert isinstance(weight_sequence, list)
         weight_sequence = torch.stack(weight_sequence, dim=0)
 
         # Concatenate weight tokens before sample tokens
@@ -601,7 +611,7 @@ def print_gpu_detailed_info() -> None:
         allocated = torch.cuda.memory_allocated(i) / 1024**3
         reserved = torch.cuda.memory_reserved(i) / 1024**3
 
-        logging.info(f"\n--- GPU {i} ---")
+        logging.info(f"--- GPU {i} ---")
         logging.info(f"Name: {props.name}")
         logging.info(f"Compute Capability: {props.major}.{props.minor}")
         logging.info(f"Total Memory: {total_mem:.2f} GB")
@@ -611,3 +621,114 @@ def print_gpu_detailed_info() -> None:
         logging.info(f"Max Threads per SM: {props.max_threads_per_multi_processor}")
 
     logging.info("====================================")
+
+
+def setup_ddp(base_seed: int = 0) -> int:
+    dist.init_process_group(
+        backend="nccl",
+        init_method="env://",
+    )
+    local_rank = int(os.environ["LOCAL_RANK"])
+    torch.cuda.set_device(local_rank)
+
+    if dist.is_available() and dist.is_initialized():
+        global_rank = dist.get_rank()
+    else:
+        global_rank = 0
+    seed = base_seed + global_rank
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+    if global_rank == 0:
+        logging.info(f"[DDP] base_seed={base_seed}")
+    logging.info(f"[DDP] rank={global_rank}, seed={seed}")
+    return local_rank
+
+
+def _ddp_reduce_scalar(tensor: torch.Tensor) -> float:
+    """
+    Reduce a scalar tensor across DDP ranks and return mean value (Python float).
+    Safe for DDP / non-DDP.
+    """
+    if not FLAGS.ddp or not dist.is_available() or not dist.is_initialized():
+        return tensor.item()
+
+    t = tensor.detach()
+    dist.all_reduce(t, op=dist.ReduceOp.SUM)
+    t /= dist.get_world_size()
+    return t.item()
+
+def add_scalar_ddp(name: str, value: torch.Tensor, add_scalar_fn):
+    scalar = _ddp_reduce_scalar(value)
+    if not FLAGS.ddp or dist.get_rank() == 0:
+        add_scalar_fn(name, scalar)
+
+def add_scalars_ddp(values: dict[str, torch.Tensor], add_scalar_fn):
+    for tag, tensor in values.items():
+        scalar = _ddp_reduce_scalar(tensor)
+        if not FLAGS.ddp or dist.get_rank() == 0:
+            add_scalar_fn(tag, scalar)
+
+
+def unwrap_model(model):
+    return model.module if hasattr(model, "module") else model
+
+
+def get_ddp_msg():
+    if FLAGS.ddp and dist.is_available() and dist.is_initialized():
+        return f"[DDP] global_rank={dist.get_rank()} >>> "
+    return ""
+
+
+def make_optimizer(
+    optim_config: "common.OptimizerConfig",
+    model: nn.Module,
+) -> tuple[Optimizer, LRScheduler]:
+    # AdamW lr -> 1e-4
+    # SGD lr   -> 1e-5 ~ 1e-6
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=optim_config.learning_rate/100,
+    )
+    # optimizer = torch.optim.SGD(
+    #     model.parameters(),
+    #     lr=optim_config.learning_rate,
+    #     # momentum=optim_config.learning_momentum,
+    # )
+
+    # scheduler = torch.optim.lr_scheduler.StepLR(
+    #     optimizer,
+    #     step_size=optim_config.lr_decay_steps,
+    #     gamma=optim_config.lr_decay_rate,
+    # )
+    scheduler = torch.optim.lr_scheduler.LambdaLR(
+        optimizer,
+        lr_lambda=lambda step: (
+            optim_config.lr_decay_rate
+            ** (step / optim_config.lr_decay_steps)
+        ),
+    )
+
+    return optimizer, scheduler
+
+
+def dbg_ddp(tag, **tensors):
+    if not FLAGS.ddp:
+        return
+
+    for k, v in tensors.items():
+        try:
+            dev = v.device if hasattr(v, "device") else "no-device"
+            req = v.requires_grad if hasattr(v, "requires_grad") else "no-req"
+            shape = tuple(v.shape) if hasattr(v, "shape") else "no-shape"
+            logging.info(
+                f"[DDP] rank={dist.get_rank()} >>> "
+                f"{tag} {k}: device={dev}, req_grad={req}, shape={shape}, dtype={getattr(v,'dtype',None)}"
+            )
+        except Exception as e:
+            logging.info(
+                f"[DDP] rank={dist.get_rank()} >>> "
+                f"{tag} {k}: cannot inspect ({e})"
+            )

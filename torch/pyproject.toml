@@ -1,8 +1,8 @@
 [tool.poetry]
 name = "hypertransformer"
-version = "1.0.0"
+version = "1.1.5"
 description = "Pytorch implementation of (Continual) HyperTransformer."
-authors = ["__z__ <imzqqq@hotmail.com>"]
+authors = ["alpinebuster <imzqqq@hotmail.com>"]
 license = "AGPL-3.0-or-later"
 readme = "README.md"
 classifiers = [
@@ -32,7 +32,7 @@ pytest = "^9.0.2"
 setuptools_rust = ">=1.12.0"
 attrs = "^25.4.0"
 numpy = "^2.4.0"
-fastai = "^2.8.2"
+fastai = "^2.8.6"
 scipy = "^1.16.1"
 pandas = "^2.2.1"
 ipywidgets = "^8.1.7"
@@ -50,7 +50,6 @@ scapy = "^2.6.1"
 netron = "^8.8.1"
 absl-py = "^2.3.1"
 
-# srsly = { version = "^2.5", optional = true }
 torch = { version = "^2.9.1", optional = true }
 torcheval = { version = "^0.0.7", optional = true }
 # View model summaries in PyTorch!

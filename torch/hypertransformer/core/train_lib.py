@@ -16,13 +16,14 @@ import torch.nn.functional as F
 from hypertransformer.core import common_ht
 from hypertransformer.core.common_ht import LayerwiseModelConfig, DatasetConfig
 from hypertransformer.core import datasets
+from hypertransformer.core import util
 
 
 @dataclasses.dataclass
 class ModelState:
     """Model state."""
 
-    loss: Optional[torch.Tensor] = None
+    loss: Optional[float] = None
 
 
 def _make_augmentation_config(data_config: DatasetConfig, num_labels: int):
@@ -57,9 +58,12 @@ def _load_cache(data_config: DatasetConfig) -> Optional[dict[int, np.ndarray]]:
 
     pattern = os.path.join(data_config.cache_path, f"*{data_config.dataset_name}_ch_first*.npy")
     files = glob.glob(pattern)
-    path = files[0] if files else ""
+    path = os.path.abspath(files[0]) if files else ""
 
-    logging.info(f'Looking for cache in "{data_config.cache_path}..."')
+    logging.info(
+        f"{util.get_ddp_msg()}"
+        f'Looking for cache in "{data_config.cache_path}..."'
+    )
     if os.path.exists(path):
         # Reading a NumPy cache.
         with open(path, "rb") as dev:
@@ -87,6 +91,7 @@ def _load_cache(data_config: DatasetConfig) -> Optional[dict[int, np.ndarray]]:
                 index += 1
         return output
     logging.info(
+        f"{util.get_ddp_msg()}"
         f"No cache files for {data_config.dataset_name} found. Falling back "
         "to torch dataset."
     )

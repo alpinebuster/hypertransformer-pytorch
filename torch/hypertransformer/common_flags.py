@@ -13,6 +13,7 @@ flags.DEFINE_integer(
     "(overwritten by `train_dataset` label specification).",
 )
 flags.DEFINE_float("learning_rate", 1e-3, "Learning rate.")
+flags.DEFINE_float("learning_momentum", .9, "Learning momentum.")
 flags.DEFINE_float("learning_rate_decay_steps", 10000, "Learning rate decay steps.")
 flags.DEFINE_float("learning_rate_decay_rate", 1.0, "Learning rate decay rate.")
 flags.DEFINE_integer("train_steps", 10000, "Number of training steps.")
@@ -28,7 +29,7 @@ STRIDE = flags.DEFINE_integer("stride", 2, "Stride of the conv layers.")
 flags.DEFINE_integer("image_size", 28, "Image size.")
 flags.DEFINE_integer("num_sample_repeats", 1, "Number of repeats for each task.")
 flags.DEFINE_integer(
-    "steps_between_saves", 50000, "Number of steps between model saves."
+    "steps_between_saves", 1000, "Number of steps between model saves."
 )
 flags.DEFINE_string("cnn_model_name", "3-layer", "CNN model to train.")
 flags.DEFINE_integer("embedding_dim", 8, "Dimensionality of the embedding.")
@@ -356,4 +357,9 @@ flags.DEFINE_string(
     "all",
     "Comma-separated list of visible GPU ids, e.g. '0', '0,1' or 'all'. "
     "If None or all, use all available GPUs. If set to `-1`, no GPUs are made available."
+)
+flags.DEFINE_bool(
+    "ddp",
+    False,
+    "If set, use PyTorch DistributedDataParallel for multi-GPU training.",
 )

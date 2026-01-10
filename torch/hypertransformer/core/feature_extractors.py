@@ -8,9 +8,11 @@ from absl import flags, logging
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.distributed as dist
 
 from hypertransformer.core.common_ht import LayerwiseModelConfig
 from hypertransformer.core.util import same_pad_2d
+from hypertransformer.core import util
 
 FLAGS = flags.FLAGS
 
@@ -103,6 +105,7 @@ class SimpleConvFeatureExtractor(FeatureExtractor):
             # PyTorch    -> BCHW, spatial dims are [-2], [-1]
             if tensor.shape[-2] < self.kernel_size or tensor.shape[-1] < self.kernel_size:
                 logging.info(
+                    f"{util.get_ddp_msg()}"
                     f"{self.__class__.__name__} cannot apply Conv2d at layer {len(outputs)+1}: "
                     f"spatial size {(tensor.shape[-2], tensor.shape[-1])} "
                     f"is smaller than kernel_size={self.kernel_size}. "
@@ -213,6 +216,7 @@ class SharedMultilayerFeatureExtractor(FeatureExtractor):
         for idx, (conv, bn) in enumerate(zip(self.convs, self.bns)):
             if tensor.shape[-2] < self.kernel_size or tensor.shape[-1] < self.kernel_size:
                 logging.info(
+                    f"{util.get_ddp_msg()}"
                     f"{self.__class__.__name__} cannot apply Conv2d at layer {idx+1}: "
                     f"spatial size {(tensor.shape[-2], tensor.shape[-1])} "
                     f"is smaller than kernel_size={self.kernel_size}. "

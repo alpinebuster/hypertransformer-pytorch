@@ -5,8 +5,6 @@ import pytest
 from hypertransformer.core.feature_extractors import SimpleConvFeatureExtractor, \
     SharedMultilayerFeatureExtractor, PassthroughFeatureExtractor
 
-print("\nTORCH VERSION IN TEST:", torch.__version__)
-
 
 # ------------------------------------------------------------
 #   Class `SimpleConvFeatureExtractor` Tests

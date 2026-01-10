@@ -8,7 +8,7 @@
 python -m hypertransformer.train --num_layerwise_features=8 --default_num_channels=8 \
   --samples_transformer=20 --samples_cnn=60 --num_labels=20 --learning_rate=0.02 \
   --learning_rate_decay_steps=100000.0 --learning_rate_decay_rate=0.95 \
-  --train_steps=4000000 --steps_between_saves=50000 --lw_key_query_dim=1.0 \
+  --train_steps=4000000 --steps_between_saves=1000 --lw_key_query_dim=1.0 \
   --lw_value_dim=1.0 --lw_inner_dim=1.0 --cnn_model_name='maxpool-4-layer' \
   --embedding_dim=32 --num_layers=3 --stride=1 --heads=2 \
   --shared_feature_extractor='3-layer-bn' --shared_input_dim=1 --shared_features_dim=32 \
