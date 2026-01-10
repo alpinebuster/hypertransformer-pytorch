@@ -661,17 +661,15 @@ def _ddp_reduce_scalar(tensor: torch.Tensor) -> float:
     return t.item()
 
 def add_scalar_ddp(name: str, value: torch.Tensor, add_scalar_fn):
-    if dist.is_available() and dist.is_initialized():
-        if dist.get_rank() != 0:
-            return
-    add_scalar_fn(name, _ddp_reduce_scalar(value))
+    scalar = _ddp_reduce_scalar(value)
+    if not FLAGS.ddp or dist.get_rank() == 0:
+        add_scalar_fn(name, scalar)
 
 def add_scalars_ddp(values: dict[str, torch.Tensor], add_scalar_fn):
-    if dist.is_available() and dist.is_initialized():
-        if dist.get_rank() != 0:
-            return
     for tag, tensor in values.items():
-        add_scalar_fn(tag, _ddp_reduce_scalar(tensor))
+        scalar = _ddp_reduce_scalar(tensor)
+        if not FLAGS.ddp or dist.get_rank() == 0:
+            add_scalar_fn(tag, scalar)
 
 
 def unwrap_model(model):
@@ -714,3 +712,23 @@ def make_optimizer(
     )
 
     return optimizer, scheduler
+
+
+def dbg_ddp(tag, **tensors):
+    if not FLAGS.ddp:
+        return
+
+    for k, v in tensors.items():
+        try:
+            dev = v.device if hasattr(v, "device") else "no-device"
+            req = v.requires_grad if hasattr(v, "requires_grad") else "no-req"
+            shape = tuple(v.shape) if hasattr(v, "shape") else "no-shape"
+            logging.info(
+                f"[DDP] rank={dist.get_rank()} >>> "
+                f"{tag} {k}: device={dev}, req_grad={req}, shape={shape}, dtype={getattr(v,'dtype',None)}"
+            )
+        except Exception as e:
+            logging.info(
+                f"[DDP] rank={dist.get_rank()} >>> "
+                f"{tag} {k}: cannot inspect ({e})"
+            )

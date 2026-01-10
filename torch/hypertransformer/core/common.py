@@ -273,7 +273,7 @@ def train(
             state.model,
             device_ids=[local_rank],
             output_device=local_rank,
-            find_unused_parameters=False, # Speed up
+            find_unused_parameters=True, # Speed up
         )
         state.optimizer, state.scheduler = util.make_optimizer(optimizer_config, state.model)
 
@@ -386,6 +386,14 @@ def train(
         state.optimizer.zero_grad()
         total_loss.backward()
         state.model_state.loss = total_loss.detach().item()
+
+        # if FLAGS.ddp:
+        #     for name, p in unwrapped_model.named_parameters():
+        #         if p.requires_grad and p.grad is None:
+        #             logging.info(
+        #                 f"[DDP][rank={global_rank}] NO GRAD: {name}"
+        #             )
+
         state.optimizer.step()
         assert state.scheduler is not None
         state.scheduler.step()
