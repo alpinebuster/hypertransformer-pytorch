@@ -652,7 +652,7 @@ def _ddp_reduce_scalar(tensor: torch.Tensor) -> float:
     Reduce a scalar tensor across DDP ranks and return mean value (Python float).
     Safe for DDP / non-DDP.
     """
-    if not FLAGS.ddp or not dist.is_available() or not dist.is_initialized():
+    if not FLAGS.use_ddp or not dist.is_available() or not dist.is_initialized():
         return tensor.item()
 
     t = tensor.detach()
@@ -662,13 +662,13 @@ def _ddp_reduce_scalar(tensor: torch.Tensor) -> float:
 
 def add_scalar_ddp(name: str, value: torch.Tensor, add_scalar_fn):
     scalar = _ddp_reduce_scalar(value)
-    if not FLAGS.ddp or dist.get_rank() == 0:
+    if not FLAGS.use_ddp or dist.get_rank() == 0:
         add_scalar_fn(name, scalar)
 
 def add_scalars_ddp(values: dict[str, torch.Tensor], add_scalar_fn):
     for tag, tensor in values.items():
         scalar = _ddp_reduce_scalar(tensor)
-        if not FLAGS.ddp or dist.get_rank() == 0:
+        if not FLAGS.use_ddp or dist.get_rank() == 0:
             add_scalar_fn(tag, scalar)
 
 
@@ -677,7 +677,7 @@ def unwrap_model(model):
 
 
 def get_ddp_msg():
-    if FLAGS.ddp and dist.is_available() and dist.is_initialized():
+    if FLAGS.use_ddp and dist.is_available() and dist.is_initialized():
         return f"[DDP] global_rank={dist.get_rank()} >>> "
     return ""
 
@@ -715,7 +715,7 @@ def make_optimizer(
 
 
 def dbg_ddp(tag, **tensors):
-    if not FLAGS.ddp:
+    if not FLAGS.use_ddp:
         return
 
     for k, v in tensors.items():

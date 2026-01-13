@@ -77,7 +77,7 @@ class TrainState:
     large_summaries: dict[str, torch.Tensor] = field(default_factory=dict)
 
     def save(self):
-        if FLAGS.ddp and dist.get_rank() != 0:
+        if FLAGS.use_ddp and dist.get_rank() != 0:
             return
 
         logging.info(f"Saving checkpoint at step {self.global_step}")
@@ -256,18 +256,18 @@ def train(
     local_rank = None
     global_rank = None
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    if FLAGS.ddp:
+    if FLAGS.use_ddp:
         local_rank = int(os.environ["LOCAL_RANK"])
         global_rank = dist.get_rank()
         device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
     state.model = state.model.to(device)
-    if not FLAGS.ddp or global_rank == 0:
+    if not FLAGS.use_ddp or global_rank == 0:
         for name, param in state.model.named_parameters():
             logging.info(f"{name}, device: {param.device}, grad: {param.grad is None}")
     state.model.dataset.to(device)
 
     # DDP
-    if FLAGS.ddp:
+    if FLAGS.use_ddp:
         # torch.autograd.set_detect_anomaly(True)
         """
         When `find_unused_parameters=True`, DDP will, after each forward-backward pass:
@@ -396,7 +396,7 @@ def train(
         total_loss.backward()
         state.model_state.loss = total_loss.detach().item()
 
-        # if FLAGS.ddp:
+        # if FLAGS.use_ddp:
         #     for name, p in unwrapped_model.named_parameters():
         #         if p.requires_grad and p.grad is None:
         #             logging.info(
@@ -427,7 +427,7 @@ def train(
             )
             state.small_summaries["accuracy/test_accuracy"] = test_accuracy
 
-        if (state.global_step - start_step) % 100 == 1 and (not FLAGS.ddp or global_rank == 0):
+        if (state.global_step - start_step) % 100 == 1 and (not FLAGS.use_ddp or global_rank == 0):
             logging.info(
                 f"{util.get_ddp_msg()}"
                 "Step: %d, Time per step: %f",

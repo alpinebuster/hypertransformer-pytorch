@@ -371,9 +371,9 @@ def main(argv):
     if len(argv) > 1:
         del argv
 
-    if FLAGS.ddp:
+    if FLAGS.use_ddp:
         util.setup_ddp()
-    if FLAGS.ddp and dist.get_rank() == 0:
+    if not FLAGS.use_ddp or dist.get_rank() == 0:
         logging.info(f"FLAGS: {FLAGS.flag_values_dict()}")
 
     gpus: str = FLAGS.gpus

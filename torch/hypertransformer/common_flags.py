@@ -359,7 +359,7 @@ flags.DEFINE_string(
     "If None or all, use all available GPUs. If set to `-1`, no GPUs are made available."
 )
 flags.DEFINE_bool(
-    "ddp",
+    "use_ddp",
     False,
     "If set, use PyTorch DistributedDataParallel for multi-GPU training.",
 )

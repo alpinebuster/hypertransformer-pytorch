@@ -58,7 +58,7 @@ nohup torchrun --nproc_per_node=2 ./hypertransformer/train.py -- \
   --test_roll_probability=0.0 --test_angle_range=-1.0 \
   --data_dir=../omniglot --data_numpy_dir=../omniglot/cache \
   --train_log_dir=../omniglot/logs/torch \
-  --ddp \
+  --use_ddp \
   > omniglot_ddp.log 2>&1 &
 ```
 
