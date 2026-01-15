@@ -993,6 +993,7 @@ class LogitsLayer(BaseCNNLayer):
             kernel_size=self.fe_kernel_size,
         )
 
+        self.default_fc = nn.Linear(self.input_dim, self.model_config.num_labels)
         self.generator.set_weight_params(
             num_weight_blocks=self.model_config.num_labels,
             weight_block_size=self.input_dim + 1, # + 1 bias
@@ -1022,11 +1023,13 @@ class LogitsLayer(BaseCNNLayer):
 
         # [batch, channels] → [batch, num_labels]
         W = selected_weights["kernel"]
-        b = selected_weights["bias"]
-        assert W is not None and b is not None
-        # input:  [B, in_features]
-        # weight: [out_features, in_features]
-        return F.linear(dropout_tensor, weight=W.t(), bias=b)
+        B = selected_weights["bias"]
+
+        if W is not None and B is not None:
+            # input:  [B, in_features]
+            # weight: [out_features, in_features]
+            return F.linear(dropout_tensor, weight=W.t(), bias=B)
+        return self.default_fc(dropout_tensor)
 
     def _var_getter(self, weights: Optional[list[torch.Tensor]], name: str) -> Optional[torch.Tensor]:
         if weights is None:
@@ -1090,9 +1093,13 @@ class FlattenLogitsLayer(LogitsLayer):
                 wrap_class=feature_extractor_class,
             )
 
+        self.default_fc = nn.Linear(
+            self.input_dim*width*height,
+            self.model_config.num_labels,
+        )
         self.generator.set_weight_params(
             num_weight_blocks=self.model_config.num_labels,
-            weight_block_size=self.input_dim * width * height + 1, # + 1 bias
+            weight_block_size=self.input_dim*width*height + 1, # + 1 bias
         )
         self.generator.set_feature_extractor_class(feature_extractor_class)
 
@@ -1114,11 +1121,13 @@ class FlattenLogitsLayer(LogitsLayer):
 
         # [batch, C*H*W] → [batch, num_labels]
         W = selected_weights["kernel"]
-        b = selected_weights["bias"]
-        assert W is not None and b is not None
-        # input:  [B, in_features]
-        # weight: [out_features, in_features]
-        return F.linear(dropout_tensor, weight=W.t(), bias=b)
+        B = selected_weights["bias"]
+
+        if W is not None and B is not None:
+            # input:  [B, in_features]
+            # weight: [out_features, in_features]
+            return F.linear(dropout_tensor, weight=W.t(), bias=B)
+        return self.default_fc(dropout_tensor)
 
 
 # ------------------------------------------------------------

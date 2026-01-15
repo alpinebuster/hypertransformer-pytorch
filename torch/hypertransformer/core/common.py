@@ -178,12 +178,24 @@ def _make_warmup_loss(
     loss = torch.tensor(0., device=loss_prediction.device)
     weights = []
 
+    _torch_ref = loss_heads[0]
+    global_step_t = torch.tensor(
+        global_step,
+        device=_torch_ref.device,
+        dtype=_torch_ref.dtype,
+    )
+    steps_per_stage_t = torch.tensor(
+        steps_per_stage,
+        device=_torch_ref.device,
+        dtype=_torch_ref.dtype,
+    )
+
     # The following code ends up returning just the true model head loss
     # after `global_step` reaches `warmup_steps`.
 
     for stage, head_loss in enumerate(loss_heads):
-        target_steps = stage * steps_per_stage
-        norm_step_dist = torch.abs(global_step - target_steps) / steps_per_stage
+        target_steps = stage * steps_per_stage_t
+        norm_step_dist = torch.abs(global_step_t-target_steps) / steps_per_stage_t
         # This weight starts at 0 and peaks reaching 1 at `target_steps`. It then
         # decays linearly to 0 and stays 0.
         # weight = max(0, 1 - norm_step_dist)
@@ -191,8 +203,8 @@ def _make_warmup_loss(
         weights.append(weight)
         loss += weight * head_loss
 
-    target_steps = num_heads * steps_per_stage
-    norm_step_dist = 1. + (global_step - target_steps) / steps_per_stage
+    target_steps = num_heads * steps_per_stage_t
+    norm_step_dist = 1. + (global_step_t-target_steps) / steps_per_stage_t
     norm_step_dist = torch.relu(norm_step_dist)
     # Weight for the actual objective linearly grows after the final layer head
     # peaks and then stays equal to 1.

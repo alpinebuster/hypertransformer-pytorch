@@ -24,4 +24,5 @@ python -m hypertransformer.train --num_layerwise_features=8 --default_num_channe
   --shuffle_labels_seed=2022 --test_rotation_probability=0.0 \
   --test_smooth_probability=0.0 --test_contrast_probability=0.0 \
   --test_resize_probability=0.0 --test_negate_probability=0.0 \
-  --test_roll_probability=0.0 --test_angle_range=-1.0 $@
+  --test_roll_probability=0.0 --test_angle_range=-1.0 \
+  --warmup_steps=5000 $@
